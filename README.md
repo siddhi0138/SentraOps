@@ -17,8 +17,8 @@ Milestone 4: Enterprise SOC Platform  - Streaming, graph, RBAC, deployment
 Building this in dependency order, since each layer needs the one before it:
 
 - [x] Step 1 — Ingestion, normalization, persistence
-- [x] **Step 2 — Auth + RBAC** (this step)
-- [ ] Step 3 — Correlation engine (upgrade the legacy `/investigate` demo into a real service over persisted events)
+- [x] Step 2 — Auth + RBAC
+- [x] **Step 3 — Correlation engine** (this step)
 - [ ] Step 4 — React dashboard + investigation page
 - [ ] Step 5 — Assets, search, incidents workflow, notifications, reports
 
@@ -47,6 +47,34 @@ Raw logs (Windows / syslog / web server / firewall / CloudTrail / generic)
 Every raw payload is kept in `raw_logs` for audit/replay even if it fails
 to parse — nothing is silently dropped.
 
+### What step 3 delivers
+
+The correlation engine (`backend/app/correlation.py`) turns a pile of
+individually-normalized events into incidents an analyst can actually act
+on, instead of dozens of disconnected alerts:
+
+```
+Uncorrelated events (severity medium/high/critical = "alerts")
+        |
+        v
+   Cluster alerts into connected components
+   (shared username / host / source IP, case-insensitive)
+        |
+        v
+   Per cluster: pull in the full timeline (all severities, same identity)
+        |
+        v
+   Classify (ransomware/exfil vs privilege escalation vs suspicious)
+   + mock threat-intel lookup + risk scoring + response recommendations
+   + markdown incident report
+        |
+        v
+   Incident row (events.incident_id backfilled) -> GET /incidents
+```
+
+Re-running `/correlate` only looks at events not yet attached to an
+incident, so it's safe to call repeatedly as new logs arrive.
+
 ### Supported log sources
 
 | source_type  | Input format                          |
@@ -64,7 +92,10 @@ to parse — nothing is silently dropped.
 - `POST /ingest/upload?source_type=...` — multipart file upload, CSV or JSON. **Requires admin or analyst role.**
 - `POST /simulate/{scenario}` — ingests a synthetic attack scenario across multiple real log formats so you can try the platform without real infrastructure (currently: `phishing_ransomware`). **Requires admin or analyst role.**
 - `GET /events?q=&event_type=&severity=&username=&host=&source_ip=&limit=&offset=` — search/filter persisted events. **Requires any authenticated role.**
-- `POST /investigate` — legacy milestone-1-thin-slice demo (in-memory six-agent pipeline over a fixed sample file); will be replaced by a correlation engine over `/events` in step 3. **Requires admin or analyst role.**
+- `POST /correlate` — clusters not-yet-correlated events into incidents. **Requires admin or analyst role.**
+- `GET /incidents?status=&risk_level=&limit=&offset=` — list incidents. **Requires any authenticated role.**
+- `GET /incidents/{id}` — full incident detail: timeline, alerts, threat intel, risk factors, recommended actions, markdown report. **Requires any authenticated role.**
+- `PATCH /incidents/{id}?status=open|closed` — update incident status. **Requires admin or analyst role.**
 
 ### Auth + RBAC
 
@@ -117,7 +148,8 @@ uvicorn app.main:app --reload
 curl -X POST localhost:8000/auth/register -H "Content-Type: application/json" -d '{"email":"you@corp.com","password":"Secret123!"}'
 TOKEN=$(curl -s -X POST localhost:8000/auth/login -H "Content-Type: application/json" -d '{"email":"you@corp.com","password":"Secret123!"}' | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
 curl -X POST localhost:8000/simulate/phishing_ransomware -H "Authorization: Bearer $TOKEN"
-curl "localhost:8000/events?severity=critical" -H "Authorization: Bearer $TOKEN"
+curl -X POST localhost:8000/correlate -H "Authorization: Bearer $TOKEN"
+curl localhost:8000/incidents -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Tests
@@ -132,17 +164,16 @@ python -m pytest
 ```
 backend/
   app/
-    agents/       # milestone-1 thin-slice pipeline (pre-DB, still used by /investigate)
-    parsers/       # per-source-format normalizers + registry
-    db.py          # SQLAlchemy engine/session (Postgres or SQLite)
-    db_models.py   # RawLog, Event, User tables
-    auth.py        # password hashing, JWT, RBAC dependencies
-    ingestion.py   # parse + persist raw logs
-    simulate.py    # synthetic attack scenarios for demoing without real infra
+    parsers/        # per-source-format normalizers + registry
+    db.py           # SQLAlchemy engine/session (Postgres or SQLite)
+    db_models.py    # RawLog, Event, User, Incident tables
+    auth.py         # password hashing, JWT, RBAC dependencies
+    ingestion.py    # parse + persist raw logs
+    correlation.py  # cluster events into incidents, score risk, recommend actions
+    simulate.py     # synthetic attack scenarios for demoing without real infra
     main.py         # FastAPI app
   data/
     samples/        # one raw-format fixture per source type
-    sample_logs.json # legacy /investigate fixture
   tests/
 docker-compose.yml
 ```

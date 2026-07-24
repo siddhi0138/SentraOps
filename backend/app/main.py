@@ -2,7 +2,7 @@ import csv
 import io
 import json
 from contextlib import asynccontextmanager
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
@@ -26,15 +26,11 @@ from app.auth import (
     require_roles,
     verify_password,
 )
+from app.correlation import run_correlation
 from app.db import get_db, init_db
-from app.db_models import Event, User
+from app.db_models import Event, Incident, User
 from app.ingestion import ingest
-from app.models import LogEvent
-from app.pipeline import SecurityPipeline
 from app.simulate import get_scenario
-
-SAMPLE_LOGS_PATH = Path(__file__).resolve().parent.parent / "data" / "sample_logs.json"
-legacy_pipeline = SecurityPipeline()
 
 
 @asynccontextmanager
@@ -120,16 +116,6 @@ def update_user_role(
     db.commit()
     db.refresh(user)
     return _user_out(user)
-
-
-@app.post("/investigate")
-def investigate(_user: User = Depends(require_roles(Role.admin, Role.analyst))) -> dict:
-    """Legacy in-memory correlation demo. Will be replaced by a correlation
-    engine that runs over persisted /events once step 3 lands."""
-    raw_logs = json.loads(SAMPLE_LOGS_PATH.read_text())
-    logs = [LogEvent(**entry) for entry in raw_logs]
-    incident = legacy_pipeline.run(logs)
-    return incident.model_dump()
 
 
 @app.post("/ingest/{source_type}")
@@ -228,3 +214,63 @@ def list_events(
     events = query.order_by(Event.timestamp.desc()).offset(offset).limit(min(limit, 500)).all()
 
     return {"total": total, "events": [e.to_dict() for e in events]}
+
+
+@app.post("/correlate")
+def correlate(
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst)),
+) -> dict:
+    incidents = run_correlation(db)
+    return {"incidents_created": len(incidents), "incidents": [i.to_summary_dict() for i in incidents]}
+
+
+@app.get("/incidents")
+def list_incidents(
+    status: str | None = None,
+    risk_level: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    query = db.query(Incident)
+    if status:
+        query = query.filter(Incident.status == status)
+    if risk_level:
+        query = query.filter(Incident.risk_level == risk_level)
+
+    total = query.count()
+    incidents = query.order_by(Incident.created_at.desc()).offset(offset).limit(min(limit, 500)).all()
+
+    return {"total": total, "incidents": [i.to_summary_dict() for i in incidents]}
+
+
+@app.get("/incidents/{incident_id}")
+def get_incident(
+    incident_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    incident = db.get(Incident, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return incident.to_detail_dict()
+
+
+@app.patch("/incidents/{incident_id}")
+def update_incident_status(
+    incident_id: int,
+    status: str = Query(..., pattern="^(open|closed)$"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst)),
+) -> dict:
+    incident = db.get(Incident, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    incident.status = status
+    incident.closed_at = datetime.now(timezone.utc) if status == "closed" else None
+    db.commit()
+    db.refresh(incident)
+    return incident.to_detail_dict()
