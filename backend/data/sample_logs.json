@@ -1,0 +1,10 @@
+[
+  {"timestamp": "2026-07-24T09:14:02", "host": "FINANCE-PC-21", "user": "j.mehta", "event_type": "email_opened", "detail": "Invoice_2026_0472.docx.exe opened from phishing email", "source_ip": null},
+  {"timestamp": "2026-07-24T09:16:40", "host": "FINANCE-PC-21", "user": "j.mehta", "event_type": "login_failed", "detail": "Failed login attempt", "source_ip": "185.220.101.45"},
+  {"timestamp": "2026-07-24T09:16:52", "host": "FINANCE-PC-21", "user": "j.mehta", "event_type": "login_failed", "detail": "Failed login attempt", "source_ip": "185.220.101.45"},
+  {"timestamp": "2026-07-24T09:17:10", "host": "FINANCE-PC-21", "user": "j.mehta", "event_type": "vpn_login_success", "detail": "VPN login succeeded", "source_ip": "185.220.101.45"},
+  {"timestamp": "2026-07-24T09:22:31", "host": "FINANCE-PC-21", "user": "j.mehta", "event_type": "process_execution", "detail": "powershell.exe -enc <base64>", "source_ip": null},
+  {"timestamp": "2026-07-24T09:25:07", "host": "FINANCE-PC-21", "user": "j.mehta", "event_type": "privilege_escalation", "detail": "New local admin account 'svc_update' created", "source_ip": null},
+  {"timestamp": "2026-07-24T09:29:44", "host": "DB-SERVER-03", "user": "svc_update", "event_type": "data_transfer", "detail": "2.3 GB exported from customers.db", "source_ip": "185.220.101.45"},
+  {"timestamp": "2026-07-24T09:33:12", "host": "FINANCE-PC-21", "user": "svc_update", "event_type": "process_execution", "detail": "vssadmin.exe delete shadows /all /quiet", "source_ip": null}
+]
