@@ -233,7 +233,16 @@ you already have.
   evidence doesn't support an answer. No conversation memory yet (each
   question is answered independently); that's a reasonable v2, not
   required for a working analyst chat.
-- [ ] Step 4 — Incident explanation, timeline narration, threat summary
+- [x] **Step 4 — Incident explanation, timeline narration, threat summary**
+  (`GET /incidents/{id}/explain`, "AI Analysis" card on the Incident Detail
+  page). One Groq call in JSON mode returns a plain-language explanation of
+  the risk level, a narrated timeline paragraph, and a structured summary
+  (attack type, affected user, affected assets, impact) — all grounded in
+  that incident's own report. Not persisted; regenerated on request (a
+  "Regenerate" button), so it always reflects the incident's current state.
+  Confidence is the correlation engine's own computed value, not something
+  the LLM estimates — keeps it consistent with what the rest of the app
+  already shows.
 - [ ] Step 5 — Log explanation, NL→query generator, similar-incident
   search, threat knowledge Q&A, executive/analyst report modes,
   confidence/explainability display
@@ -262,12 +271,15 @@ must be the `pgvector/pgvector:pg16` image (already the default in
   shows up anywhere in this repo, check the nearest Dockerfile's
   `COPY`/`.dockerignore` pairing immediately.
 
-**Chat endpoint:**
+**AI endpoints:**
 - `POST /chat` — body `{"question"}` → `{question, answer, sources}`.
   `sources` is the same shape `/rag/search` returns, so the UI can link
-  straight back to the incidents/events that grounded the answer. Returns
-  `503` if `GROQ_API_KEY` isn't set, `502` if Groq itself fails (rate
-  limit, timeout, ...). **Requires any authenticated role.**
+  straight back to the incidents/events that grounded the answer.
+- `GET /incidents/{id}/explain` → `{explanation, timeline_narrative,
+  attack_type, affected_user, affected_assets, impact, confidence}`.
+
+Both return `503` if `GROQ_API_KEY` isn't set, `502` if Groq itself fails
+(rate limit, timeout, ...). **Require any authenticated role.**
 
 ## Run it
 

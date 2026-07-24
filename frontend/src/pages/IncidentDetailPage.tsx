@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { SeverityBadge, StatusBadge } from '../components/Badge'
-import type { IncidentDetail, Severity, User } from '../api/types'
+import type { IncidentDetail, IncidentExplanation, Severity, User } from '../api/types'
 
 const PRIORITIES: Severity[] = ['low', 'medium', 'high', 'critical']
 
@@ -21,6 +22,9 @@ export function IncidentDetailPage() {
   const [commentBody, setCommentBody] = useState('')
   const [postingComment, setPostingComment] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [explanation, setExplanation] = useState<IncidentExplanation | null>(null)
+  const [explaining, setExplaining] = useState(false)
+  const [explainError, setExplainError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -100,6 +104,19 @@ export function IncidentDetailPage() {
       await api.downloadIncidentReport(incident.id)
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : 'Failed to download report')
+    }
+  }
+
+  async function handleExplain() {
+    if (!incident) return
+    setExplaining(true)
+    setExplainError(null)
+    try {
+      setExplanation(await api.explainIncident(incident.id))
+    } catch (err) {
+      setExplainError(err instanceof ApiError ? err.message : 'Failed to generate AI explanation')
+    } finally {
+      setExplaining(false)
     }
   }
 
@@ -200,6 +217,67 @@ export function IncidentDetailPage() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-indigo-900/60 bg-indigo-950/20 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium text-indigo-300">AI Analysis</h2>
+          <button
+            onClick={handleExplain}
+            disabled={explaining}
+            className="rounded-lg border border-indigo-700 hover:bg-indigo-900/40 disabled:opacity-50 text-xs px-3 py-1.5 transition text-indigo-300"
+          >
+            {explaining ? 'Analyzing...' : explanation ? 'Regenerate' : 'Explain with AI'}
+          </button>
+        </div>
+
+        {explainError && (
+          <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2 mb-3">{explainError}</p>
+        )}
+
+        {!explanation && !explaining && !explainError && (
+          <p className="text-sm text-slate-500">
+            Generate a plain-language explanation of why this incident matters, a narrated timeline, and a
+            structured summary - grounded in this incident's own report, not a generic description.
+          </p>
+        )}
+
+        {explanation && (
+          <div className="space-y-4">
+            <div className="prose prose-invert prose-sm max-w-none prose-p:my-1.5">
+              <ReactMarkdown>{explanation.explanation}</ReactMarkdown>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Timeline narrative</p>
+              <p className="text-sm text-slate-300">{explanation.timeline_narrative}</p>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Attack type</p>
+                <p className="text-slate-200">{explanation.attack_type}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Affected user</p>
+                <p className="text-slate-200">{explanation.affected_user}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Affected assets</p>
+                <p className="text-slate-200">{explanation.affected_assets}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Confidence</p>
+                <p className="text-slate-200">{explanation.confidence}%</p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Impact</p>
+              <p className="text-sm text-slate-300">{explanation.impact}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">

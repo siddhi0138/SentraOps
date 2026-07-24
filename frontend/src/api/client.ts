@@ -5,6 +5,7 @@ import type {
   EventItem,
   IncidentComment,
   IncidentDetail,
+  IncidentExplanation,
   IncidentStatus,
   IncidentSummary,
   Role,
@@ -165,6 +166,7 @@ export const api = {
     downloadFile('/incidents/export.csv', params, 'incidents.csv'),
   getIncident: (id: number) => request<IncidentDetail>(`/incidents/${id}`),
   downloadIncidentReport: (id: number) => downloadFile(`/incidents/${id}/report.md`, undefined, `incident-${id}-report.md`),
+  explainIncident: (id: number) => request<IncidentExplanation>(`/incidents/${id}/explain`),
   updateIncident: (id: number, payload: { status?: IncidentStatus; priority?: Severity; assignee_id?: number | null }) =>
     request<IncidentDetail>(`/incidents/${id}`, { method: 'PATCH', body: payload }),
   addComment: (id: number, body: string) => request<IncidentComment>(`/incidents/${id}/comments`, { method: 'POST', body: { body } }),

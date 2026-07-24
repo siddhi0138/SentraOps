@@ -1,3 +1,4 @@
+import json
 import os
 
 from groq import Groq, GroqError
@@ -64,3 +65,70 @@ def answer_question(question: str, evidence: list[dict]) -> str:
         raise ChatProviderError(str(exc)) from exc
 
     return response.choices[0].message.content
+
+
+EXPLAIN_SYSTEM_PROMPT = """You are CyberSentinel AI, a security analyst assistant. \
+Given an incident's report (timeline, alerts, threat intel, risk factors), \
+produce a structured explanation of it.
+
+Respond with ONLY a JSON object (no markdown fences, no extra text) with \
+exactly these string keys:
+- "explanation": 2-4 sentences explaining WHY this incident has the risk \
+level it does, referencing specific evidence (accounts, IPs, hosts, timing). \
+Written for a human, not a severity label.
+- "timeline_narrative": one prose paragraph (not a list) narrating how the \
+attack progressed from start to finish, the way an analyst would tell the \
+story to a colleague.
+- "attack_type": a short label, e.g. "Credential Compromise" or \
+"Ransomware / Data Exfiltration".
+- "affected_user": the primary compromised/involved account, or "Unknown" \
+if unclear from the evidence.
+- "affected_assets": comma-separated hostnames most affected.
+- "impact": one sentence on the likely business impact.
+
+Base everything strictly on the report given - do not invent details not \
+present in it."""
+
+
+def _fallback_explanation(raw_text: str) -> dict:
+    # The model occasionally ignores the JSON-only instruction under load;
+    # degrade to showing its raw prose as the explanation rather than a 500.
+    return {
+        "explanation": raw_text,
+        "timeline_narrative": "",
+        "attack_type": "Unknown",
+        "affected_user": "Unknown",
+        "affected_assets": "",
+        "impact": "",
+    }
+
+
+def explain_incident(report: str, confidence: int) -> dict:
+    client = _get_client()
+    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": EXPLAIN_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Incident report:\n{report}"},
+            ],
+            temperature=0.2,
+            max_tokens=700,
+            response_format={"type": "json_object"},
+        )
+    except GroqError as exc:
+        raise ChatProviderError(str(exc)) from exc
+
+    raw = response.choices[0].message.content
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = _fallback_explanation(raw)
+
+    # Confidence is the correlation engine's own computed value, not
+    # something the LLM should estimate - keeps it consistent with what
+    # the rest of the app already shows for this incident.
+    parsed["confidence"] = confidence
+    return parsed

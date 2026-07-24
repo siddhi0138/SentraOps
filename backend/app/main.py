@@ -31,7 +31,7 @@ from app.auth import (
 from app.correlation import run_correlation
 from app.db import get_db, init_db
 from app.db_models import Asset, Event, Incident, IncidentComment, Notification, User
-from app.ai import ChatConfigError, ChatProviderError, answer_question
+from app.ai import ChatConfigError, ChatProviderError, answer_question, explain_incident
 from app.ingestion import ingest
 from app.rag import search as rag_search
 from app.simulate import get_scenario
@@ -381,6 +381,27 @@ def download_incident_report(
         media_type="text/markdown",
         headers={"Content-Disposition": f"attachment; filename=incident-{incident_id}-report.md"},
     )
+
+
+@app.get("/incidents/{incident_id}/explain")
+def explain_incident_endpoint(
+    incident_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    """AI-generated explanation, timeline narrative, and structured summary
+    for one incident - one Groq call, not persisted (regenerated on
+    request), so this reflects the incident's current report every time."""
+    incident = db.get(Incident, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    try:
+        return explain_incident(incident.report, incident.confidence)
+    except ChatConfigError:
+        raise HTTPException(status_code=503, detail="AI chat isn't configured - set GROQ_API_KEY")
+    except ChatProviderError as exc:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
 
 
 class IncidentUpdate(BaseModel):

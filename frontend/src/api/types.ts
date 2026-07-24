@@ -116,3 +116,13 @@ export interface ChatResponse {
   answer: string
   sources: RagResult[]
 }
+
+export interface IncidentExplanation {
+  explanation: string
+  timeline_narrative: string
+  attack_type: string
+  affected_user: string
+  affected_assets: string
+  impact: string
+  confidence: number
+}
