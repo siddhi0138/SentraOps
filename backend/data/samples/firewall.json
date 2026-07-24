@@ -1,0 +1,5 @@
+[
+  {"timestamp": "2026-07-24T09:17:15Z", "action": "ALLOW", "protocol": "TCP", "src_ip": "185.220.101.45", "dst_ip": "10.0.0.21", "dst_port": 443, "dst_host": "FINANCE-PC-21"},
+  {"timestamp": "2026-07-24T09:29:44Z", "action": "ALLOW", "protocol": "TCP", "src_ip": "185.220.101.45", "dst_ip": "10.0.0.14", "dst_port": 445, "dst_host": "DB-SERVER-03"},
+  {"timestamp": "2026-07-24T09:34:00Z", "action": "DENY", "protocol": "TCP", "src_ip": "10.0.0.14", "dst_ip": "45.33.32.156", "dst_port": 6667, "dst_host": "DB-SERVER-03"}
+]

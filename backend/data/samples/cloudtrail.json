@@ -1,0 +1,6 @@
+[
+  {"eventTime": "2026-07-24T09:40:00Z", "eventName": "ConsoleLogin", "sourceIPAddress": "185.220.101.45", "userIdentity": {"userName": "svc_update"}, "responseElements": {"ConsoleLogin": "Success"}},
+  {"eventTime": "2026-07-24T09:41:12Z", "eventName": "CreateUser", "sourceIPAddress": "185.220.101.45", "userIdentity": {"userName": "svc_update"}},
+  {"eventTime": "2026-07-24T09:42:30Z", "eventName": "AttachUserPolicy", "sourceIPAddress": "185.220.101.45", "userIdentity": {"userName": "svc_update"}},
+  {"eventTime": "2026-07-24T09:45:00Z", "eventName": "GetObject", "sourceIPAddress": "185.220.101.45", "userIdentity": {"userName": "svc_update"}}
+]

@@ -1,0 +1,4 @@
+Jul 24 09:16:40 db-server-03 sshd[1122]: Failed password for invalid user admin from 185.220.101.45 port 51824 ssh2
+Jul 24 09:16:52 db-server-03 sshd[1122]: Failed password for invalid user admin from 185.220.101.45 port 51825 ssh2
+Jul 24 09:17:31 db-server-03 sshd[1130]: Accepted password for svc_update from 185.220.101.45 port 51902 ssh2
+Jul 24 09:30:02 db-server-03 sudo: svc_update : TTY=pts/0 ; PWD=/home/svc_update ; USER=root ; COMMAND=/usr/bin/mysqldump customers
