@@ -225,9 +225,14 @@ you already have.
   catch bugs in the pgvector-specific code (and didn't: see below).
 - [x] **Step 2 — RAG retrieval endpoint** (`GET /rag/search?q=&content_type=`)
   — semantic search over that index, no LLM call yet. This is the
-  retrieval half of RAG; the chat endpoint (next) is retrieval + generation.
-- [ ] Step 3 — AI chat endpoint + page (the actual "ask a question, get a
-  grounded answer with sources" loop)
+  retrieval half of RAG; step 3 is retrieval + generation.
+- [x] **Step 3 — AI chat** (`POST /chat`, "AI Analyst" page). Retrieves
+  evidence via the same `app/rag.py` search, then a Groq call grounded in
+  it — instructed to cite specific hosts/users/timestamps/incident numbers
+  from the evidence and to say so plainly rather than guess when the
+  evidence doesn't support an answer. No conversation memory yet (each
+  question is answered independently); that's a reasonable v2, not
+  required for a working analyst chat.
 - [ ] Step 4 — Incident explanation, timeline narration, threat summary
 - [ ] Step 5 — Log explanation, NL→query generator, similar-incident
   search, threat knowledge Q&A, executive/analyst report modes,
@@ -240,15 +245,29 @@ must be the `pgvector/pgvector:pg16` image (already the default in
 `docker-compose.yml`); a plain `postgres` image doesn't have the
 `vector` extension available for the migration to enable.
 
-**Real bug this step caught:** `Embedding.vector.cosine_distance(...)`
-raised `AttributeError` the first time it ran against real Postgres,
-because wrapping `pgvector.sqlalchemy.Vector` in a `TypeDecorator` (needed
-for the SQLite fallback) doesn't automatically forward the wrapped type's
-special comparator methods — needs `comparator_factory = Vector.comparator_factory`
-set explicitly. All prior testing had only exercised the SQLite path, which
-never calls that method at all. Lesson: dialect-specific code needs a
-dialect-specific test, full stop — a passing SQLite test proves nothing
-about the Postgres path when the two paths use genuinely different code.
+**Real bugs these steps caught:**
+- `Embedding.vector.cosine_distance(...)` raised `AttributeError` the first
+  time it ran against real Postgres, because wrapping
+  `pgvector.sqlalchemy.Vector` in a `TypeDecorator` (needed for the SQLite
+  fallback) doesn't automatically forward the wrapped type's special
+  comparator methods — needs `comparator_factory = Vector.comparator_factory`
+  set explicitly. All prior testing had only exercised the SQLite path,
+  which never calls that method at all. Lesson: dialect-specific code needs
+  a dialect-specific test, full stop — a passing SQLite test proves nothing
+  about the Postgres path when the two paths use genuinely different code.
+- `backend/.env` (holding the real Groq key) had no `.dockerignore` entry,
+  so `COPY . .` baked the live key straight into the built Docker image —
+  confirmed via `docker run ... cat /app/.env`, then fixed with
+  `backend/.dockerignore` and a clean rebuild. Whenever a new `.env` file
+  shows up anywhere in this repo, check the nearest Dockerfile's
+  `COPY`/`.dockerignore` pairing immediately.
+
+**Chat endpoint:**
+- `POST /chat` — body `{"question"}` → `{question, answer, sources}`.
+  `sources` is the same shape `/rag/search` returns, so the UI can link
+  straight back to the incidents/events that grounded the answer. Returns
+  `503` if `GROQ_API_KEY` isn't set, `502` if Groq itself fails (rate
+  limit, timeout, ...). **Requires any authenticated role.**
 
 ## Run it
 
@@ -312,6 +331,7 @@ backend/
     correlation.py  # cluster events into incidents, score risk, recommend actions, notify, embed incidents
     embeddings.py   # local sentence-transformers wrapper (free, no API key)
     rag.py          # store/search embeddings (pgvector on Postgres, brute-force on SQLite)
+    ai.py           # Groq client + system prompt - the "generation" half of RAG
     simulate.py     # synthetic attack scenarios for demoing without real infra
     main.py         # FastAPI app
   alembic/          # migrations - see "Database migrations" above
@@ -323,7 +343,7 @@ frontend/
     api/            # fetch client (JWT storage + refresh-on-401) + TS types
     auth/           # AuthContext (login/register/logout, session restore)
     components/     # Layout, ProtectedRoute, badges, stat cards, SearchBar, NotificationBell
-    pages/          # Login, Register, Dashboard, Events, Incidents(+ detail), Assets
+    pages/          # Login, Register, Dashboard, Events, Incidents(+ detail), Assets, AIAnalyst
 docker-compose.yml
 ```
 
@@ -331,4 +351,4 @@ docker-compose.yml
 
 Backend: FastAPI, SQLAlchemy, Alembic, Postgres + pgvector, Redis (wired up, not yet used), Docker.
 AI: Groq (`llama-3.3-70b-versatile`, free tier) for generation, local `sentence-transformers` for embeddings — no paid API required for any of it.
-Frontend: React, TypeScript, Tailwind CSS v4, React Router, Recharts, Vite, nginx (prod image).
+Frontend: React, TypeScript, Tailwind CSS v4 (+ typography plugin), React Router, Recharts, react-markdown, Vite, nginx (prod image).

@@ -31,6 +31,7 @@ from app.auth import (
 from app.correlation import run_correlation
 from app.db import get_db, init_db
 from app.db_models import Asset, Event, Incident, IncidentComment, Notification, User
+from app.ai import ChatConfigError, ChatProviderError, answer_question
 from app.ingestion import ingest
 from app.rag import search as rag_search
 from app.simulate import get_scenario
@@ -573,6 +574,34 @@ def semantic_search(
     retrieval half of RAG - no LLM call here, just ranked evidence. Milestone
     2's chat endpoint will call this same function to ground its answers."""
     return {"query": q, "results": rag_search(db, q, content_type=content_type, k=min(k, 20))}
+
+
+class ChatRequest(BaseModel):
+    question: str
+
+
+@app.post("/chat")
+def chat(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    """RAG in full: semantic search for evidence, then a Groq call grounded
+    in that evidence. Distinguishes a missing API key (503 - not configured)
+    from a real provider failure (502 - configured but Groq itself failed)."""
+    if not payload.question.strip():
+        raise HTTPException(status_code=422, detail="question cannot be empty")
+
+    evidence = rag_search(db, payload.question, k=8)
+
+    try:
+        answer = answer_question(payload.question, evidence)
+    except ChatConfigError:
+        raise HTTPException(status_code=503, detail="AI chat isn't configured - set GROQ_API_KEY")
+    except ChatProviderError as exc:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
+
+    return {"question": payload.question, "answer": answer, "sources": evidence}
 
 
 @app.get("/notifications")

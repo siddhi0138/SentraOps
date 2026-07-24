@@ -1,6 +1,7 @@
 import type {
   AppNotification,
   Asset,
+  ChatResponse,
   EventItem,
   IncidentComment,
   IncidentDetail,
@@ -176,6 +177,8 @@ export const api = {
   search: (q: string) => request<SearchResults>('/search', { params: { q } }),
 
   getStats: () => request<Stats>('/stats'),
+
+  chat: (question: string) => request<ChatResponse>('/chat', { method: 'POST', body: { question } }),
 
   listNotifications: (params: { unread_only?: boolean } = {}) =>
     request<{ unread_count: number; notifications: AppNotification[] }>('/notifications', {

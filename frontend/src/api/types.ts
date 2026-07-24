@@ -103,3 +103,16 @@ export interface Stats {
   severity_distribution: Record<Severity, number>
   recent_incidents: IncidentSummary[]
 }
+
+export interface RagResult {
+  content_type: 'event' | 'incident'
+  content_id: number | null
+  text: string
+  score: number | null
+}
+
+export interface ChatResponse {
+  question: string
+  answer: string
+  sources: RagResult[]
+}

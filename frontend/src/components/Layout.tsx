@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/events', label: 'Events', end: false },
   { to: '/incidents', label: 'Incidents', end: false },
   { to: '/assets', label: 'Assets', end: false },
+  { to: '/ai-analyst', label: 'AI Analyst', end: false },
 ]
 
 export function Layout() {
