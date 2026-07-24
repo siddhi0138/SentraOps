@@ -18,8 +18,8 @@ Building this in dependency order, since each layer needs the one before it:
 
 - [x] Step 1 — Ingestion, normalization, persistence
 - [x] Step 2 — Auth + RBAC
-- [x] **Step 3 — Correlation engine** (this step)
-- [ ] Step 4 — React dashboard + investigation page
+- [x] Step 3 — Correlation engine
+- [x] **Step 4 — React dashboard + investigation page** (this step)
 - [ ] Step 5 — Assets, search, incidents workflow, notifications, reports
 
 ### What step 1 delivers
@@ -75,6 +75,23 @@ Uncorrelated events (severity medium/high/critical = "alerts")
 Re-running `/correlate` only looks at events not yet attached to an
 incident, so it's safe to call repeatedly as new logs arrive.
 
+### What step 4 delivers
+
+A React + TypeScript + Tailwind dashboard (`frontend/`) over the API above:
+
+- **Login/Register** — JWT stored client-side, access token auto-refreshed on 401.
+- **Dashboard** — stat cards (total events, open/critical incidents), a severity
+  distribution chart, recent incidents, and a "Simulate attack + correlate"
+  button (admin/analyst only) to generate demo data with one click.
+- **Events** — searchable, filterable, paginated table over `/events`.
+- **Incidents** — list + detail view: timeline, alerts, threat intel, risk
+  factors, recommended actions, the full markdown report, and an open/close
+  status toggle (admin/analyst only).
+
+Role is enforced server-side regardless of what the UI shows/hides — the
+frontend just reflects it so a viewer doesn't see action buttons that would
+403 anyway.
+
 ### Supported log sources
 
 | source_type  | Input format                          |
@@ -126,23 +143,34 @@ publicly known.
 
 ## Run it
 
-### Option A — Docker Compose (Postgres + Redis + backend)
+### Option A — Docker Compose (Postgres + Redis + backend + frontend)
 
 ```bash
 docker compose up --build
-# API at http://localhost:8000
+# Backend API at http://localhost:8000
+# Frontend at   http://localhost:5173
 ```
 
-### Option B — local Python, SQLite (no Docker)
+### Option B — local dev (no Docker)
 
 ```bash
+# backend, in one terminal
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 # API at http://127.0.0.1:8000, data in backend/cybersentinel.db
+
+# frontend, in another terminal
+cd frontend
+npm install
+npm run dev
+# UI at http://localhost:5173, proxies /api/* to the backend (see vite.config.ts)
 ```
 
-### Try it
+Open the UI, register (the first account becomes admin), then click
+"Simulate attack + correlate" on the dashboard to generate demo data.
+
+### Try the API directly
 
 ```bash
 curl -X POST localhost:8000/auth/register -H "Content-Type: application/json" -d '{"email":"you@corp.com","password":"Secret123!"}'
@@ -157,6 +185,9 @@ curl localhost:8000/incidents -H "Authorization: Bearer $TOKEN"
 ```bash
 cd backend
 python -m pytest
+
+cd frontend
+npm run build   # typechecks (tsc) + bundles
 ```
 
 ## Folder structure
@@ -175,10 +206,16 @@ backend/
   data/
     samples/        # one raw-format fixture per source type
   tests/
+frontend/
+  src/
+    api/            # fetch client (JWT storage + refresh-on-401) + TS types
+    auth/           # AuthContext (login/register/logout, session restore)
+    components/     # Layout, ProtectedRoute, badges, stat cards
+    pages/          # Login, Register, Dashboard, Events, Incidents(+ detail)
 docker-compose.yml
 ```
 
 ## Tech stack
 
 Backend: FastAPI, SQLAlchemy, Postgres, Redis (wired up, not yet used), Docker.
-Frontend: not built yet (step 4).
+Frontend: React, TypeScript, Tailwind CSS v4, React Router, Recharts, Vite, nginx (prod image).

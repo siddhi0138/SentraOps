@@ -1,11 +1,13 @@
 import csv
 import io
 import json
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -40,6 +42,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CyberSentinel AI", version="0.2.0", lifespan=lifespan)
+
+# The frontend is a separate origin (its own dev server / nginx container),
+# so browser requests to this API need CORS. Comma-separated allowlist, or
+# "*" (default) for local/demo use.
+_cors_origins = os.environ.get("CORS_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _cors_origins == "*" else [o.strip() for o in _cors_origins.split(",")],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class IngestRequest(BaseModel):
