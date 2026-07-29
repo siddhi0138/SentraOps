@@ -23,7 +23,7 @@ services:
   neo4j:
     image: neo4j:5.26-community
     environment:
-      NEO4J_AUTH: neo4j/cybersentinel
+      NEO4J_AUTH: neo4j/sentraops
       NEO4J_PLUGINS: '[]'
     ports:
       - "7474:7474"
@@ -43,7 +43,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
-      NEO4J_PASSWORD: cybersentinel
+      NEO4J_PASSWORD: sentraops
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-insecure-secret-key-change-me-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -64,7 +64,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
-      NEO4J_PASSWORD: cybersentinel
+      NEO4J_PASSWORD: sentraops
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-insecure-secret-key-change-me-in-production}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}

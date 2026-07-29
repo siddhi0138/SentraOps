@@ -47,6 +47,6 @@ grafana:
 # than committing real values here - see deploy/terraform/variables.tf).
 secrets:
   postgresPassword: cybersentinel
-  neo4jPassword: cybersentinel
+  neo4jPassword: sentraops
   jwtSecretKey: dev-only-insecure-secret-key-change-me-in-production
   groqApiKey: ""

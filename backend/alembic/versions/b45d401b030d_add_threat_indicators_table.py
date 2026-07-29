@@ -67,7 +67,7 @@ def upgrade() -> None:
                 "indicator_type": "ip",
                 "verdict": "known Tor exit node / ransomware C2 infrastructure",
                 "confidence": 98,
-                "source": "CyberSentinel curated (demo seed)",
+                "source": "SentraOps curated (demo seed)",
                 "tags": "tor,c2",
                 "first_seen": now,
                 "last_seen": now,

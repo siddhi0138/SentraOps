@@ -39,7 +39,7 @@
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "targets": [
-        { "expr": "sum(cybersentinel_agent_investigations_total)" }
+        { "expr": "sum(sentraops_agent_investigations_total)" }
       ]
     },
     {
@@ -52,7 +52,7 @@
         "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }
       },
       "targets": [
-        { "expr": "sum(cybersentinel_agent_investigations_total{status=\"failed\"})" }
+        { "expr": "sum(sentraops_agent_investigations_total{status=\"failed\"})" }
       ]
     },
     {
@@ -63,11 +63,11 @@
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(cybersentinel_agent_investigation_duration_seconds_bucket[15m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(sentraops_agent_investigation_duration_seconds_bucket[15m])) by (le))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(cybersentinel_agent_investigation_duration_seconds_bucket[15m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(sentraops_agent_investigation_duration_seconds_bucket[15m])) by (le))",
           "legendFormat": "p95"
         }
       ]
@@ -80,7 +80,7 @@
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "targets": [
         {
-          "expr": "sum(increase(cybersentinel_agent_investigations_total[5m])) by (status)",
+          "expr": "sum(increase(sentraops_agent_investigations_total[5m])) by (status)",
           "legendFormat": "{{status}}"
         }
       ]

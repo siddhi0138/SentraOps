@@ -231,7 +231,7 @@ def _check_vulnerability_management(db: Session, organization_id: int) -> tuple[
     # data, same reasoning as ComplianceControl) - a real sync run benefits
     # every org, so this checks whether one has ever happened platform-wide,
     # not just whether the migration-seeded demo indicator exists.
-    real_count = db.query(ThreatIndicator).filter(ThreatIndicator.source != "CyberSentinel curated (demo seed)").count()
+    real_count = db.query(ThreatIndicator).filter(ThreatIndicator.source != "SentraOps curated (demo seed)").count()
     if real_count > 0:
         return (
             "satisfied",
@@ -286,7 +286,7 @@ def evaluate_controls(db: Session, organization_id: int) -> list[dict]:
     return results
 
 
-_REPORT_SYSTEM_PROMPT = """You are CyberSentinel AI, producing a compliance posture summary for an \
+_REPORT_SYSTEM_PROMPT = """You are SentraOps, producing a compliance posture summary for an \
 auditor/compliance officer audience. You are given a real list of compliance \
 controls (framework, control id, title) each with a computed status \
 ("satisfied", "partial", or "not_satisfied") and real evidence text - not \

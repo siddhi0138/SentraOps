@@ -23,7 +23,7 @@ class WebhookAction(ResponseActionPlugin):
             return False, "config.webhook_url is required"
 
         text = (
-            f"[CyberSentinel AI] {action['category'].upper()} action approved "
+            f"[SentraOps] {action['category'].upper()} action approved "
             f"for incident #{action['incident_id']}: {action['description']}"
         )
         try:

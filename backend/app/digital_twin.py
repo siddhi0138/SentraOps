@@ -63,7 +63,7 @@ def simulate_compromise(db: Session, entity_type: str, value: str, organization_
     }
 
 
-_TWIN_SYSTEM_PROMPT = """You are CyberSentinel AI, running a security "digital twin" simulation: a \
+_TWIN_SYSTEM_PROMPT = """You are SentraOps, running a security "digital twin" simulation: a \
 read-only, offline prediction of what would happen if one specific user, \
 host, or IP address were compromised - nothing is executed against any real \
 system. You are given a real blast-radius graph traversal (the actual \

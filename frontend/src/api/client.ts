@@ -56,8 +56,8 @@ import type {
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
-const ACCESS_KEY = 'cybersentinel_access_token'
-const REFRESH_KEY = 'cybersentinel_refresh_token'
+const ACCESS_KEY = 'sentraops_access_token'
+const REFRESH_KEY = 'sentraops_refresh_token'
 
 export class ApiError extends Error {
   status: number

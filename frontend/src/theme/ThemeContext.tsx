@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 
 type Theme = 'light' | 'dark'
-const STORAGE_KEY = 'cybersentinel-theme'
+const STORAGE_KEY = 'sentraops-theme'
 
 interface ThemeContextValue {
   theme: Theme

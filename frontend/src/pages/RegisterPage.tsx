@@ -43,7 +43,7 @@ export function RegisterPage() {
           </h1>
           <p className="text-sm text-muted-foreground">
             {mode === 'create'
-              ? "You'll be the first admin of a brand new CyberSentinel workspace."
+              ? "You'll be the first admin of a brand new SentraOps workspace."
               : 'Ask an admin for your organization\'s invite code.'}
           </p>
         </div>

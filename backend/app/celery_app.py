@@ -10,7 +10,7 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 # with an empty task registry and fails every dispatch with "Received
 # unregistered task" (confirmed by actually starting a worker and checking
 # its `[tasks]` list before adding this).
-celery_app = Celery("cybersentinel", broker=REDIS_URL, backend=REDIS_URL, include=["app.tasks"])
+celery_app = Celery("sentraops", broker=REDIS_URL, backend=REDIS_URL, include=["app.tasks"])
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],

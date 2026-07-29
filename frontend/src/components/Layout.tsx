@@ -138,7 +138,7 @@ export function Layout() {
               <span className="absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-severity-low pulse-dot" />
             </div>
             <div className="flex flex-col leading-none group-data-[collapsible=icon]:hidden">
-              <span className="font-mono text-sm font-semibold text-foreground">CyberSentinel</span>
+              <span className="font-mono text-sm font-semibold text-foreground">SentraOps</span>
               <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">AI Security Ops</span>
             </div>
           </div>
@@ -212,7 +212,7 @@ export function Layout() {
           <div className="flex min-w-0 items-center gap-3">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="h-4" />
-            <h1 className="truncate text-sm font-medium text-foreground">{current?.label ?? 'CyberSentinel AI'}</h1>
+            <h1 className="truncate text-sm font-medium text-foreground">{current?.label ?? 'SentraOps'}</h1>
             <Badge variant="outline" className="hidden items-center gap-1.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">
               <span className="h-1.5 w-1.5 rounded-full bg-severity-low pulse-dot" />
               <BookOpen className="h-3 w-3" />

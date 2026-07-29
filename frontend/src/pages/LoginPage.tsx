@@ -29,7 +29,7 @@ export function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <form onSubmit={handleSubmit} className="w-full max-w-sm panel p-8 space-y-4">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">CyberSentinel AI</h1>
+          <h1 className="text-xl font-semibold text-foreground">SentraOps</h1>
           <p className="text-sm text-muted-foreground">Sign in to the SOC console</p>
         </div>
 

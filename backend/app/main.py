@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="CyberSentinel AI", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="SentraOps", version="0.2.0", lifespan=lifespan)
 
 # Real, Redis-backed rate limiting (see app/rate_limit.py) - applied
 # selectively below to auth endpoints (brute-force protection) and

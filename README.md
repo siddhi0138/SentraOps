@@ -1,4 +1,4 @@
-# 🛡️ CyberSentinel AI
+# 🛡️ SentraOps
 
 **An AI Security Team for SMEs** — a real Security Operations Center platform with a multi-agent AI analyst layered on top, not a chatbot wrapper around a demo dashboard.
 

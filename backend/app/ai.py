@@ -16,7 +16,7 @@ DEFAULT_MODEL = "llama-3.3-70b-versatile"
 _PROMPT_PRICE_PER_TOKEN = 0.59 / 1_000_000
 _COMPLETION_PRICE_PER_TOKEN = 0.79 / 1_000_000
 
-SYSTEM_PROMPT = """You are CyberSentinel AI, a security analyst assistant embedded in a SOC platform.
+SYSTEM_PROMPT = """You are SentraOps, a security analyst assistant embedded in a SOC platform.
 
 Answer the analyst's question using ONLY the evidence provided below - real \
 events and incidents from this platform's own database. Do not invent hosts, \
@@ -161,7 +161,7 @@ def _explain_system_prompt(audience: str, playbook_guidance: str = "") -> str:
     # "AI Marketplace" playbook adding extra instructions to this same
     # prompt, never new code execution (see PlaybookTemplate's docstring).
     guidance_block = f"\n{playbook_guidance}\n" if playbook_guidance else ""
-    return f"""You are CyberSentinel AI, a security analyst assistant. Given an \
+    return f"""You are SentraOps, a security analyst assistant. Given an \
 incident's report (timeline, alerts, threat intel, risk factors), produce a \
 structured explanation of it.
 
@@ -223,7 +223,7 @@ def explain_incident(report: str, confidence: int, audience: str = "analyst", pl
     return parsed
 
 
-_EXPLAIN_EVENT_SYSTEM_PROMPT = """You are CyberSentinel AI, a security analyst assistant. Given a \
+_EXPLAIN_EVENT_SYSTEM_PROMPT = """You are SentraOps, a security analyst assistant. Given a \
 single raw security event/log line from a SOC platform, explain it to an analyst \
 who is scanning a large events table and needs to quickly decide whether it's worth \
 investigating.
@@ -293,7 +293,7 @@ KNOWN_EVENT_TYPES = (
 )
 KNOWN_SEVERITIES = ("low", "medium", "high", "critical")
 
-_QUERY_SYSTEM_PROMPT = f"""You are CyberSentinel AI, a security analyst assistant. Translate the \
+_QUERY_SYSTEM_PROMPT = f"""You are SentraOps, a security analyst assistant. Translate the \
 analyst's natural-language question into a STRUCTURED search filter for this \
 platform's events table. You are NOT generating SQL, KQL, or any query \
 language - only picking values for a fixed set of filter fields.

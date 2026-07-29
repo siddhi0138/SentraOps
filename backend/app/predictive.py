@@ -154,7 +154,7 @@ def get_predictive_summary(db: Session, organization_id: int) -> dict:
     }
 
 
-_BRIEFING_SYSTEM_PROMPT = """You are CyberSentinel AI, producing a predictive threat-likelihood briefing \
+_BRIEFING_SYSTEM_PROMPT = """You are SentraOps, producing a predictive threat-likelihood briefing \
 for a security analyst. You are given real statistical signals computed from \
 this organization's own historical data: anomalous user/host behavior \
 detected by an anomaly-detection model, a privilege-escalation event trend, \

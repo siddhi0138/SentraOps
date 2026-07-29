@@ -8,7 +8,7 @@ import tempfile
 # into a DB that already had them). This is only used for the app's
 # lifespan startup migration; actual test requests go through the
 # db_session fixture's own per-test database instead.
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.mkdtemp()}/cybersentinel_test.db")
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.mkdtemp()}/sentraops_test.db")
 # `.delay()` runs the Celery task inline instead of needing a real
 # broker/worker - must be set before app.celery_app is imported (by
 # app.main -> app.tasks) since it's read once at module load time.

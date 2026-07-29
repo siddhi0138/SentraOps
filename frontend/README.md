@@ -1,6 +1,6 @@
-# CyberSentinel AI — frontend
+# SentraOps — frontend
 
-React + TypeScript + Tailwind CSS + Vite dashboard for the CyberSentinel AI
+React + TypeScript + Tailwind CSS + Vite dashboard for the SentraOps
 backend. See the [repo root README](../README.md) for how to run the full
 stack, what each page does, and the API it talks to.
 

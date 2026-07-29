@@ -12,7 +12,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # first, not in main.py.
 load_dotenv()
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./cybersentinel.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./sentraops.db")
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args)

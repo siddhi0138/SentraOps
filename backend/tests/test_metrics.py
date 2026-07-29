@@ -46,9 +46,9 @@ def test_completed_investigation_increments_metrics(client, analyst_headers):
     _run_investigation(client, analyst_headers, incident_id)
     after = client.get("/metrics").text
 
-    assert 'cybersentinel_agent_investigations_total{status="completed"}' in after
-    assert after.count('cybersentinel_agent_investigations_total{status="completed"}') >= 1
-    assert "cybersentinel_agent_investigation_duration_seconds_count" in after
+    assert 'sentraops_agent_investigations_total{status="completed"}' in after
+    assert after.count('sentraops_agent_investigations_total{status="completed"}') >= 1
+    assert "sentraops_agent_investigation_duration_seconds_count" in after
     assert before != after
 
 
@@ -59,4 +59,4 @@ def test_failed_investigation_increments_failed_metric(client, analyst_headers):
     _run_investigation(client, analyst_headers, incident_id, detection_side_effect=ChatProviderError("rate limited"))
 
     after = client.get("/metrics").text
-    assert 'cybersentinel_agent_investigations_total{status="failed"}' in after
+    assert 'sentraops_agent_investigations_total{status="failed"}' in after

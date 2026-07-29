@@ -86,7 +86,7 @@ def get_summary(db: Session, organization_id: int) -> dict:
     }
 
 
-_BRIEFING_SYSTEM_PROMPT = """You are CyberSentinel AI, producing a security briefing for a company's \
+_BRIEFING_SYSTEM_PROMPT = """You are SentraOps, producing a security briefing for a company's \
 executive leadership (CEO/CFO/board level, not technical staff). You are given \
 real aggregate statistics from the security platform - not raw logs. Write in \
 plain business language: no jargon, no event IDs, no protocol names. Focus on \
