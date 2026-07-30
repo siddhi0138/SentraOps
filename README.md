@@ -19,7 +19,7 @@ Every feature below is backed by a real running system, not a mock:
 - A real 6-agent [LangGraph](https://github.com/langchain-ai/langgraph) pipeline investigates each incident, with its own conversation log
 - A real graph database (Neo4j) backs attack-path and blast-radius analysis
 - Real LLM calls (Groq), grounded in your own ingested data via retrieval — the assistant explicitly says so when the evidence doesn't support an answer, rather than inventing one
-- Every proposed AI response action requires human approval before anything is treated as "executed" — nothing here is autonomous by default
+- Every proposed AI response action requires human approval before anything is treated as "executed" — nothing here is autonomous by default, whether the resulting action is an outbound webhook or a real Jira/ServiceNow ticket
 
 ---
 
@@ -34,6 +34,7 @@ Every feature below is backed by a real running system, not a mock:
 **🤖 AI Security Team**
 - 6 specialized agents (Detection → Investigation → Threat Intel → Risk → Response → Report) collaborating on one incident
 - Natural-language chat and search, grounded in your real events via RAG
+- Dual-evidence confidence scoring on every chat answer — cross-checks the RAG retrieval's own semantic-similarity score against whether the same entities are actually connected in the real Neo4j attack graph, instead of trusting either signal alone
 - Institutional memory: repeat hosts/users and similar past incidents feed into agent reasoning, not just the current incident in isolation
 - Live streaming investigation status over WebSockets
 - Learning loop — analyst feedback (accurate / false positive / missed) on past AI investigations, tracked as a real accuracy record over time
@@ -43,14 +44,22 @@ Every feature below is backed by a real running system, not a mock:
 - Digital Twin — "what happens if this is compromised?" blast-radius simulation with an AI-narrated lateral-movement story
 - Attack Replay — step through a real incident's timeline chronologically, then through the AI's own investigation stages
 
+**💬 Slack Integration**
+- Real OAuth "Connect to Slack" install — one registered app, independently installable into any organization's own workspace, multi-tenant by design
+- New-incident alerts, live per-agent investigation progress, and Approve/Reject buttons for proposed actions, posted straight into the workspace (via the incoming-webhook the OAuth grant returns, not a bot that has to be manually invited into a channel)
+- Slash commands: `/sentraops status | incidents | summary | ask <question> | hunt <topic> | investigate <id>`
+- Optional routing of critical-severity incidents to a second, dedicated channel
+- Daily AI-generated executive summary, posted automatically (Celery Beat)
+
 **🏢 Enterprise**
 - Multi-tenant organizations with real data isolation, verified with dedicated cross-tenant tests
-- Pluggable connector framework (real free-tier feeds: URLhaus, GitHub Security Advisories) and response-action webhooks
+- Pluggable connector framework (real free-tier feeds: URLhaus, GitHub Security Advisories) and response actions — outbound webhooks (Slack/Discord/generic), plus real Jira and ServiceNow ticket creation for an approved response action
 - Compliance mapping (NIST / MITRE / CIS / PCI-DSS) against your real ingested data
 - Executive dashboard with AI-generated briefings
 - Predictive anomaly detection over real host/user behavior
 - SOC Command Center — a unified live queue of incidents and pending approvals
 - Playbook marketplace, RBAC, API keys, audit log
+- Guided in-app product tour for first-time users
 
 **📊 Observability**
 - Prometheus + Grafana out of the box, with app-specific metrics (investigation duration, AI call cost/latency, success rate) — not just generic HTTP metrics
@@ -100,6 +109,8 @@ On first open, register a new organization from the login screen, then click **S
 | `GROQ_API_KEY` | For AI features | Free tier at console.groq.com. The rest of the app works without it. |
 | `JWT_SECRET_KEY` | For production | Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `DATABASE_URL` | No | Defaults to the Postgres container in `docker-compose.yml` |
+| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET` | For Slack integration | From your own Slack app at api.slack.com/apps. The rest of the app works without it — "Connect to Slack" just won't appear functional until set. |
+| `FRONTEND_URL` | For Slack integration | Where Slack redirects/links back to after an OAuth install (e.g. `http://localhost:5173`) |
 
 ---
 
