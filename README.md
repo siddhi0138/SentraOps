@@ -4,8 +4,6 @@
 
 **An AI Security Team for SMEs** — a real Security Operations Center platform with a multi-agent AI analyst layered on top, not a chatbot wrapper around a demo dashboard.
 
-[![CI](https://github.com/siddhi0138/SentraOps/actions/workflows/ci.yml/badge.svg)](https://github.com/siddhi0138/SentraOps/actions/workflows/ci.yml)
-
 </div>
 
 ---
@@ -147,9 +145,4 @@ This started as a solo portfolio project, but issues and PRs are welcome.
 - Real verification matters more than test coverage numbers here — if you're adding a feature that touches the AI agents, the graph, or anything dialect-sensitive (SQLite vs. Postgres), a live check against the real service is worth more than a mocked test that can't catch what the mock doesn't model.
 
 ---
-
-<div align="center">
-
-Built as a portfolio project demonstrating agentic AI orchestration, multi-tenant SaaS architecture, graph analytics, and full-stack systems design — not a CRUD dashboard with an AI label on it.
-
 </div>
