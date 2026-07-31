@@ -43,8 +43,8 @@ Every feature below is backed by a real running system, not a mock:
 - Neo4j-backed attack graph — see how hosts/users/IPs connect across *every* incident, not just one at a time
 - Digital Twin — "what happens if this is compromised?" blast-radius simulation with an AI-narrated lateral-movement story
 - Attack Replay — step through a real incident's timeline chronologically, then through the AI's own investigation stages
-- Breach & Attack Simulation (BAS) — executes real MITRE ATT&CK techniques (discovery, defense-evasion, C2) inside a real, disposable Kubernetes pod your own deployment controls, not canned data; real command output flows through the same ingestion/correlation/AI-investigation pipeline as any other source
-- **Simulate attack + correlate** (Dashboard) is real-with-fallback: tries a real BAS campaign first when your deployment has cluster access, and only falls back to a canned synthetic scenario when it doesn't — the response always says honestly which one ran, never presents synthetic data as real
+- Breach & Attack Simulation (BAS) — executes real MITRE ATT&CK techniques (14, spanning discovery, collection, credential-access, defense-evasion, and C2) inside a real, disposable Kubernetes pod your own deployment controls, not canned data; real command output flows through the same ingestion/correlation/AI-investigation pipeline as any other source
+- **Simulate attack + correlate** (Dashboard) is real-with-fallback: tries a real BAS campaign first when your deployment has cluster access, and only falls back to a canned synthetic scenario when it doesn't — the response always says honestly which one ran, never presents synthetic data as real. Each run assembles a different, believable technique chain (a couple of real discovery techniques plus a random handful of the rest), so it's not the same canned attack on every click
 
 **💬 Slack Integration**
 - Real OAuth "Connect to Slack" install — one registered app, independently installable into any organization's own workspace, multi-tenant by design
