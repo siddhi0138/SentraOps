@@ -276,12 +276,12 @@ def me(user: User = Depends(get_current_user)) -> UserOut:
 @app.get("/users", response_model=list[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> list[UserOut]:
-    # analysts need this to populate the incident-assignee picker; only role
-    # changes stay admin-only (see update_user_role below). Scoped to the
-    # caller's own organization - an admin must never see or manage another
-    # tenant's user list.
+    # Every role can see who's on the team (harmless - just email + role);
+    # only role *changes* stay Owner/Admin-only (see update_user_role
+    # below). Scoped to the caller's own organization - no one ever sees or
+    # manages another tenant's user list.
     users = db.query(User).filter(User.organization_id == user.organization_id).order_by(User.id).all()
     return [_user_out(u) for u in users]
 

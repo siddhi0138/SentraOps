@@ -62,6 +62,7 @@ Every feature below is backed by a real running system, not a mock:
 - SOC Command Center — a unified live queue of incidents and pending approvals
 - Playbook marketplace, API keys, audit log
 - RBAC with six real SOC roles - Owner and Admin (full org/integration config; only an Owner can grant/revoke Owner itself), SOC Manager and Analyst (investigate, chat, approve actions), Executive and Auditor (read-only everywhere)
+- Team management (Settings → Admin) — every role can see who's on the team, Owners/Admins can change anyone's role in one click
 - Guided in-app product tour for first-time users
 
 **📊 Observability**

@@ -2,7 +2,86 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { isAdminRole } from '../auth/roles'
-import type { ApiKeyCreated, ApiKeySummary, AuditLogEntryItem, OrganizationSettings } from '../api/types'
+import type { ApiKeyCreated, ApiKeySummary, AuditLogEntryItem, OrganizationSettings, Role, User } from '../api/types'
+
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: 'owner', label: 'Owner' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'soc_manager', label: 'SOC Manager' },
+  { value: 'analyst', label: 'Analyst' },
+  { value: 'executive', label: 'Executive' },
+  { value: 'auditor', label: 'Auditor' },
+]
+
+const ROLE_LABELS: Record<Role, string> = Object.fromEntries(ROLE_OPTIONS.map((o) => [o.value, o.label])) as Record<Role, string>
+
+function UsersSection({ currentUserId, canEdit }: { currentUserId: number | undefined; canEdit: boolean }) {
+  const [users, setUsers] = useState<User[]>([])
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setUsers(await api.listUsers())
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function changeRole(userId: number, role: Role) {
+    setBusyId(userId)
+    setError(null)
+    try {
+      await api.updateUserRole(userId, role)
+      await load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to change role')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-sm font-medium text-foreground">Team</h2>
+      <p className="text-xs text-muted-foreground">
+        {canEdit
+          ? 'Only an Owner can grant or revoke the Owner role itself - everything else here any Owner/Admin can change.'
+          : 'Only an Owner/Admin can change roles.'}
+      </p>
+      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
+
+      <div className="divide-y divide-secondary">
+        {users.map((u) => (
+          <div key={u.id} className="flex items-center justify-between gap-4 py-2">
+            <div className="min-w-0">
+              <p className="text-sm text-foreground truncate">
+                {u.email} {u.id === currentUserId && <span className="text-xs text-muted-foreground">(you)</span>}
+              </p>
+            </div>
+            {canEdit ? (
+              <select
+                value={u.role}
+                onChange={(e) => void changeRole(u.id, e.target.value as Role)}
+                disabled={busyId === u.id}
+                className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs text-foreground disabled:opacity-50"
+              >
+                {ROLE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs text-muted-foreground uppercase tracking-wide">{ROLE_LABELS[u.role]}</span>
+            )}
+          </div>
+        ))}
+        {users.length === 0 && <p className="text-sm text-muted-foreground py-2">No users found.</p>}
+      </div>
+    </div>
+  )
+}
 
 function OrgSettingsSection({ org, isAdmin, onChange }: { org: OrganizationSettings; isAdmin: boolean; onChange: () => void }) {
   const [name, setName] = useState(org.name)
@@ -234,6 +313,7 @@ export function EnterpriseAdminPage() {
         <p className="text-sm text-muted-foreground mt-1">Organization settings, API keys, and the security audit log.</p>
       </div>
       <OrgSettingsSection org={org} isAdmin={isAdmin} onChange={() => void loadOrg()} />
+      <UsersSection currentUserId={user?.id} canEdit={isAdmin} />
       {isAdmin ? (
         <>
           <ApiKeysSection />

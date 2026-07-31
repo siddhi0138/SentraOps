@@ -135,9 +135,11 @@ def test_admin_can_list_and_promote_users(client, test_org, register_and_login):
     assert response.json()["role"] == "analyst"
 
 
-def test_non_admin_cannot_list_users(client, viewer_headers):
+def test_any_role_can_list_users(client, viewer_headers):
+    # Viewing teammates (email + role) is harmless read-only info - every
+    # role can see it, only *changing* someone's role is admin-only.
     response = client.get("/users", headers=viewer_headers)
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 def test_promoted_auditor_gains_analyst_access_without_new_login(client, test_org, register_and_login):
