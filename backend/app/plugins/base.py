@@ -14,6 +14,13 @@ class ConnectorPlugin(ABC):
     category: str
     source_type: str = "generic"
     config_fields: list[str] = []
+    # "config" (default): the frontend collects config_fields as plain text
+    # inputs and POSTs them straight to /connectors. "oauth": there are no
+    # user-entered fields at all - the frontend instead renders a "Connect"
+    # link to GET /connectors/{key}/authorize, and the resulting
+    # ConnectorInstance's config (access_token, team id, ...) is populated
+    # server-side by the OAuth callback, never typed in by a user.
+    auth_type: str = "config"
 
     @abstractmethod
     def test_connection(self, config: dict) -> tuple[bool, str]:

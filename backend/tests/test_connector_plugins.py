@@ -2,6 +2,8 @@ from unittest.mock import patch
 
 import httpx
 
+from app.plugins.actions.jira import JiraAction
+from app.plugins.actions.servicenow import ServiceNowAction
 from app.plugins.actions.webhook import WebhookAction
 from app.plugins.connectors.generic_rest import GenericRestConnector
 from app.plugins.connectors.github_events import GitHubEventsConnector
@@ -243,3 +245,78 @@ def test_generic_rest_test_connection_reports_http_error_status():
 def test_generic_rest_test_connection_requires_base_url():
     ok, message = GenericRestConnector().test_connection({})
     assert ok is False
+
+
+JIRA_CONFIG = {
+    "base_url": "https://acme.atlassian.net",
+    "email": "admin@acme.com",
+    "api_token": "fake-token",
+    "project_key": "SEC",
+}
+
+
+def test_jira_action_requires_full_config():
+    ok, message = JiraAction().execute({}, {"category": "containment", "incident_id": 1, "description": "x"})
+    assert ok is False
+    assert "required" in message
+
+
+def test_jira_action_creates_issue_and_reports_key():
+    action = {"category": "containment", "incident_id": 7, "description": "Isolate FINANCE-PC-21"}
+    with patch(
+        "app.plugins.actions.jira.httpx.post",
+        return_value=_response(f"{JIRA_CONFIG['base_url']}/rest/api/3/issue", 201, json_body={"key": "SEC-142"}),
+    ) as mock_post:
+        ok, message = JiraAction().execute(JIRA_CONFIG, action)
+
+    assert ok is True
+    assert "SEC-142" in message
+    call_kwargs = mock_post.call_args.kwargs
+    assert call_kwargs["auth"] == (JIRA_CONFIG["email"], JIRA_CONFIG["api_token"])
+    assert call_kwargs["json"]["fields"]["project"]["key"] == "SEC"
+
+
+def test_jira_action_reports_http_failure():
+    action = {"category": "containment", "incident_id": 7, "description": "x"}
+    with patch("app.plugins.actions.jira.httpx.post", side_effect=httpx.ConnectError("unreachable")):
+        ok, message = JiraAction().execute(JIRA_CONFIG, action)
+    assert ok is False
+    assert "unreachable" in message
+
+
+SERVICENOW_CONFIG = {
+    "instance_url": "https://acmedev.service-now.com",
+    "username": "admin",
+    "password": "fake-password",
+}
+
+
+def test_servicenow_action_requires_full_config():
+    ok, message = ServiceNowAction().execute({}, {"category": "containment", "incident_id": 1, "description": "x"})
+    assert ok is False
+    assert "required" in message
+
+
+def test_servicenow_action_creates_incident_and_reports_number():
+    action = {"category": "eradication", "incident_id": 9, "description": "Reset compromised credentials"}
+    with patch(
+        "app.plugins.actions.servicenow.httpx.post",
+        return_value=_response(
+            f"{SERVICENOW_CONFIG['instance_url']}/api/now/table/incident", 201, json_body={"result": {"number": "INC0012345"}}
+        ),
+    ) as mock_post:
+        ok, message = ServiceNowAction().execute(SERVICENOW_CONFIG, action)
+
+    assert ok is True
+    assert "INC0012345" in message
+    call_kwargs = mock_post.call_args.kwargs
+    assert call_kwargs["auth"] == (SERVICENOW_CONFIG["username"], SERVICENOW_CONFIG["password"])
+    assert call_kwargs["json"]["urgency"] == "2"
+
+
+def test_servicenow_action_reports_http_failure():
+    action = {"category": "containment", "incident_id": 7, "description": "x"}
+    with patch("app.plugins.actions.servicenow.httpx.post", side_effect=httpx.ConnectError("unreachable")):
+        ok, message = ServiceNowAction().execute(SERVICENOW_CONFIG, action)
+    assert ok is False
+    assert "unreachable" in message

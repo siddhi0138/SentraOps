@@ -62,6 +62,23 @@ spec:
                   key: GROQ_API_KEY
             - name: GROQ_MODEL
               value: {{ .Values.backend.groqModel | quote }}
+            - name: FRONTEND_URL
+              value: {{ .Values.backend.frontendUrl | quote }}
+            - name: SLACK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cybersentinel.fullname" . }}-secrets
+                  key: SLACK_CLIENT_ID
+            - name: SLACK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cybersentinel.fullname" . }}-secrets
+                  key: SLACK_CLIENT_SECRET
+            - name: SLACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cybersentinel.fullname" . }}-secrets
+                  key: SLACK_SIGNING_SECRET
           ports:
             - containerPort: 8000
           readinessProbe:

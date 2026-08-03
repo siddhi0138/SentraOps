@@ -20,6 +20,10 @@ backend:
   nodePort: 30080
   corsOrigins: "*"
   groqModel: llama-3.3-70b-versatile
+  # Where a user's real browser lands after installing the Slack app (see
+  # app/slack_oauth.py) and where Slack messages link back to - must be
+  # reachable by a human's browser, not internal cluster DNS.
+  frontendUrl: http://localhost:5173
 
 celeryWorker:
   replicas: 1
@@ -50,3 +54,11 @@ secrets:
   neo4jPassword: sentraops
   jwtSecretKey: dev-only-insecure-secret-key-change-me-in-production
   groqApiKey: ""
+  # Empty by default - the Slack bot feature (app/slack_bot.py,
+  # /connectors/slack/*) degrades to "not connected" without these, it
+  # never blocks the rest of the app. Get these from api.slack.com/apps
+  # after creating the SentraOps app (Basic Information tab for the
+  # signing secret, OAuth & Permissions for the client id/secret).
+  slackClientId: ""
+  slackClientSecret: ""
+  slackSigningSecret: ""

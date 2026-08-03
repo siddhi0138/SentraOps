@@ -23,8 +23,12 @@ spec:
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           # --pool=solo: sentence-transformers/torch imports aren't obviously
           # fork-safe with Celery's default prefork pool (same reasoning as
-          # docker-compose.yml's celery_worker service).
-          command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--pool=solo"]
+          # docker-compose.yml's celery_worker service). -B embeds Celery
+          # Beat (the daily-slack-summaries schedule, app/celery_app.py) in
+          # this same process rather than a dedicated Beat deployment - see
+          # that file's beat_schedule comment for why that's fine at this
+          # project's single-worker scale.
+          command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--pool=solo", "-B"]
           env:
             # POSTGRES_PASSWORD must be listed before DATABASE_URL - see the
             # matching comment in backend.yaml for why.
@@ -58,3 +62,5 @@ spec:
                   key: GROQ_API_KEY
             - name: GROQ_MODEL
               value: {{ .Values.backend.groqModel | quote }}
+            - name: FRONTEND_URL
+              value: {{ .Values.backend.frontendUrl | quote }}

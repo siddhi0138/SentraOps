@@ -9,14 +9,14 @@ def test_list_connector_plugins(client, viewer_headers):
     response = client.get("/plugins/connectors", headers=viewer_headers)
     assert response.status_code == 200
     keys = {c["key"] for c in response.json()["connectors"]}
-    assert keys == {"urlhaus", "github_events", "generic_rest"}
+    assert keys == {"urlhaus", "github_events", "generic_rest", "slack"}
 
 
 def test_list_response_action_plugins(client, viewer_headers):
     response = client.get("/plugins/response-actions", headers=viewer_headers)
     assert response.status_code == 200
     keys = {a["key"] for a in response.json()["actions"]}
-    assert keys == {"webhook"}
+    assert keys == {"webhook", "jira", "servicenow"}
 
 
 def test_create_connector_requires_admin(client, analyst_headers, viewer_headers, admin_headers):
