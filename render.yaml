@@ -63,3 +63,19 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  - type: web
+    name: sentraops-metrics-agent
+    runtime: docker
+    dockerfilePath: ./monitoring/prometheus-agent/Dockerfile
+    dockerContext: ./monitoring/prometheus-agent
+    plan: free
+    envVars:
+      - key: BACKEND_HOST
+        sync: false
+      - key: GRAFANA_CLOUD_REMOTE_WRITE_URL
+        sync: false
+      - key: GRAFANA_CLOUD_USER
+        sync: false
+      - key: GRAFANA_CLOUD_API_KEY
+        sync: false

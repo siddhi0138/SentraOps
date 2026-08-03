@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: sentraops-backend
+    metrics_path: /metrics
+    scheme: https
+    static_configs:
+      - targets: ["${BACKEND_HOST}"]
+
+remote_write:
+  - url: ${GRAFANA_CLOUD_REMOTE_WRITE_URL}
+    basic_auth:
+      username: ${GRAFANA_CLOUD_USER}
+      password: ${GRAFANA_CLOUD_API_KEY}
