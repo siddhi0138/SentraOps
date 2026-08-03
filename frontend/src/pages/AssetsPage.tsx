@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { SeverityBadge } from '../components/Badge'
 import type { Asset, Severity } from '../api/types'
@@ -14,13 +14,17 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
   const [os, setOs] = useState(asset.os ?? '')
   const [criticality, setCriticality] = useState<Severity>(asset.criticality)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   async function save() {
     setSaving(true)
+    setSaveError(null)
     try {
       const updated = await api.updateAsset(asset.id, { department, owner, os, criticality })
       onSaved(updated)
       setEditing(false)
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : 'Failed to save')
     } finally {
       setSaving(false)
     }
@@ -76,13 +80,16 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
       </td>
       <td className="px-4 py-2 text-slate-400">{asset.event_count}</td>
       <td className="px-4 py-2 whitespace-nowrap text-slate-400 font-mono text-xs">{asset.last_seen}</td>
-      <td className="px-4 py-2 flex gap-2">
-        <button disabled={saving} onClick={save} className="text-emerald-400 hover:underline text-xs disabled:opacity-50">
-          Save
-        </button>
-        <button onClick={() => setEditing(false)} className="text-slate-400 hover:underline text-xs">
-          Cancel
-        </button>
+      <td className="px-4 py-2">
+        <div className="flex gap-2">
+          <button disabled={saving} onClick={save} className="text-emerald-400 hover:underline text-xs disabled:opacity-50">
+            Save
+          </button>
+          <button onClick={() => setEditing(false)} className="text-slate-400 hover:underline text-xs">
+            Cancel
+          </button>
+        </div>
+        {saveError && <p className="text-red-400 text-xs mt-1">{saveError}</p>}
       </td>
     </tr>
   )

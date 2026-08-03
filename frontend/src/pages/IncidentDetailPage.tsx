@@ -20,6 +20,7 @@ export function IncidentDetailPage() {
   const [showReport, setShowReport] = useState(false)
   const [commentBody, setCommentBody] = useState('')
   const [postingComment, setPostingComment] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -45,9 +46,12 @@ export function IncidentDetailPage() {
   async function toggleStatus() {
     if (!incident) return
     setUpdating(true)
+    setActionError(null)
     try {
       const next = incident.status === 'open' ? 'closed' : 'open'
       setIncident(await api.updateIncident(incident.id, { status: next }))
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to update status')
     } finally {
       setUpdating(false)
     }
@@ -55,22 +59,35 @@ export function IncidentDetailPage() {
 
   async function handlePriorityChange(priority: Severity) {
     if (!incident) return
-    setIncident(await api.updateIncident(incident.id, { priority }))
+    setActionError(null)
+    try {
+      setIncident(await api.updateIncident(incident.id, { priority }))
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to update priority')
+    }
   }
 
   async function handleAssigneeChange(assigneeIdRaw: string) {
     if (!incident) return
     const assignee_id = assigneeIdRaw === '' ? null : Number(assigneeIdRaw)
-    setIncident(await api.updateIncident(incident.id, { assignee_id }))
+    setActionError(null)
+    try {
+      setIncident(await api.updateIncident(incident.id, { assignee_id }))
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to update assignee')
+    }
   }
 
   async function handleAddComment() {
     if (!incident || !commentBody.trim()) return
     setPostingComment(true)
+    setActionError(null)
     try {
       await api.addComment(incident.id, commentBody.trim())
       setCommentBody('')
       await load()
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to post comment')
     } finally {
       setPostingComment(false)
     }
@@ -78,7 +95,12 @@ export function IncidentDetailPage() {
 
   async function handleDownloadReport() {
     if (!incident) return
-    await api.downloadIncidentReport(incident.id)
+    setActionError(null)
+    try {
+      await api.downloadIncidentReport(incident.id)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to download report')
+    }
   }
 
   if (loading) return <div className="text-slate-400">Loading incident...</div>
@@ -92,6 +114,10 @@ export function IncidentDetailPage() {
       <Link to="/incidents" className="text-sm text-slate-400 hover:text-slate-200">
         &larr; Back to incidents
       </Link>
+
+      {actionError && (
+        <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">{actionError}</p>
+      )}
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
         <div className="flex items-start justify-between gap-4">
