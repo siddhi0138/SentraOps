@@ -84,6 +84,8 @@ class Incident(Base):
     risk_score = Column(Integer, nullable=False, default=0)
     risk_level = Column(String(20), nullable=False, default="low")
     status = Column(String(20), nullable=False, default="open")
+    priority = Column(String(20), nullable=False, default="medium")
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     risk_factors = Column(JSON, nullable=False, default=list)
     threat_intel = Column(JSON, nullable=False, default=list)
@@ -96,6 +98,8 @@ class Incident(Base):
     closed_at = Column(DateTime(timezone=True), nullable=True)
 
     events = relationship("Event", back_populates="incident", order_by="Event.timestamp")
+    comments = relationship("IncidentComment", back_populates="incident", order_by="IncidentComment.created_at")
+    assignee = relationship("User")
 
     def to_summary_dict(self) -> dict:
         return {
@@ -105,6 +109,9 @@ class Incident(Base):
             "risk_score": self.risk_score,
             "risk_level": self.risk_level,
             "status": self.status,
+            "priority": self.priority,
+            "assignee_id": self.assignee_id,
+            "assignee_email": self.assignee.email if self.assignee else None,
             "affected_hosts": self.affected_hosts,
             "affected_users": self.affected_users,
             "event_count": len(self.events),
@@ -119,4 +126,77 @@ class Incident(Base):
             "recommended_actions": self.recommended_actions,
             "report": self.report,
             "timeline": [e.to_dict() for e in self.events],
+            "comments": [c.to_dict() for c in self.comments],
+        }
+
+
+class IncidentComment(Base):
+    __tablename__ = "incident_comments"
+
+    id = Column(Integer, primary_key=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    incident = relationship("Incident", back_populates="comments")
+    author = relationship("User")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "author_email": self.author.email if self.author else None,
+            "body": self.body,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class Asset(Base):
+    """A host, auto-discovered from ingested events and enriched manually."""
+
+    __tablename__ = "assets"
+
+    id = Column(Integer, primary_key=True)
+    host = Column(String(255), unique=True, index=True, nullable=False)
+    first_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    last_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    event_count = Column(Integer, nullable=False, default=0)
+
+    os = Column(String(100), nullable=True)
+    department = Column(String(100), nullable=True)
+    owner = Column(String(255), nullable=True)
+    criticality = Column(String(20), nullable=False, default="medium")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "host": self.host,
+            "first_seen": self.first_seen.isoformat() if self.first_seen else None,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+            "event_count": self.event_count,
+            "os": self.os,
+            "department": self.department,
+            "owner": self.owner,
+            "criticality": self.criticality,
+        }
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    message = Column(String(500), nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
+    is_read = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "message": self.message,
+            "incident_id": self.incident_id,
+            "is_read": self.is_read,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
