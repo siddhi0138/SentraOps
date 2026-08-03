@@ -8,6 +8,17 @@
 
 ---
 
+## 🔗 Live demo
+
+| | URL |
+|---|---|
+| App | [bit-frequencies-treated-tremendous.trycloudflare.com](https://bit-frequencies-treated-tremendous.trycloudflare.com) |
+| API docs (Swagger) | [bracket-doug-elementary-appliances.trycloudflare.com/docs](https://bracket-doug-elementary-appliances.trycloudflare.com/docs) |
+
+Self-hosted via Docker Compose behind a free Cloudflare Tunnel — real end-to-end functionality (signup, ingestion, correlation, the full 6-agent AI investigation), not a static mockup. These are Cloudflare *quick tunnel* URLs, so they're tied to the host machine staying on and will change if it restarts — if the links above are dead, that's why. See **Quick start** below to run it yourself.
+
+---
+
 ## 🧭 Why this exists
 
 Most "AI SOC" demos are a dashboard with an LLM bolted on for a chat box. SentraOps is built the other way around: a real, working Security Operations Center — real log ingestion, a real correlation engine, real multi-tenant data isolation — with a genuine multi-agent AI analyst layered on top of that foundation, not in place of it.
@@ -77,7 +88,7 @@ Every feature below is backed by a real running system, not a mock:
 | Backend | FastAPI, SQLAlchemy, Alembic, Celery + Redis |
 | AI / Agents | LangGraph, Groq (`llama-3.3-70b-versatile`), sentence-transformers (local embeddings) |
 | Data | PostgreSQL + pgvector, Neo4j |
-| Frontend | React, TypeScript, Vite, Tailwind CSS |
+| Frontend | React, TypeScript, Vite, Tailwind CSS — mobile-first (collapsing sidebar/bottom tab bar, responsive tables, no page ever scrolls horizontally as a whole) |
 | Ops | Docker Compose, Kubernetes (Helm + Terraform), Prometheus, Grafana |
 
 No paid API keys required to run the core platform — the LLM layer uses Groq's free tier, embeddings run locally (no API key at all), and the two reference connectors are free/keyless.
