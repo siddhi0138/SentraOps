@@ -22,29 +22,31 @@ Built in dependency order, since each layer needed the one before it:
 - [x] Step 4 — React dashboard + investigation page
 - [x] **Step 5 — Assets, search, incident workflow, notifications, reports** (this step)
 
-### Known limitations
+### Database migrations
 
-Found during a post-milestone bug audit and deliberately left as documented
-gaps rather than fixed, since closing them properly is a bigger scope than a
-bug fix:
+Schema changes go through Alembic (`backend/alembic/`), not
+`create_all()` — the app's startup (`init_db()`) runs `alembic upgrade head`
+against `DATABASE_URL`. To add a schema change: edit `db_models.py`, then
+`cd backend && alembic revision --autogenerate -m "..."` and review the
+generated file before committing (SQLite can't reflect expression-based
+indexes, so those need adding by hand — see the second migration for an
+example). Tests run migrations too (against their own per-test SQLite
+file), so drift between `db_models.py` and the migration files fails the
+test suite instead of silently working via `create_all()`.
 
-- **No DB migrations.** `init_db()` only runs `CREATE TABLE IF NOT EXISTS` -
-  it never alters an existing table for new columns. If you have a Postgres
-  volume from before a schema change, drop it (`docker compose down -v`)
-  rather than reusing it. Alembic belongs in a later milestone once the
-  schema is more stable.
-- **Correlation isn't safe under true concurrency.** `run_correlation`
-  reads all uncorrelated events, then writes; two `/correlate` calls firing
-  at the same instant could both grab the same events. Unlikely for a
-  single-analyst-triggered action, but a real fix would need a DB-level
-  lock.
-- **Asset upsert has a narrow race on brand-new hostnames.** Two concurrent
-  first-sightings of the same host in different casing could create two
-  Asset rows instead of merging, since the case-insensitive dedup check and
-  insert aren't atomic. Would need a case-insensitive unique index to close
-  fully.
-- **Dashboard severity chart samples the 500 most recent events**, not the
-  full table, if you have more than that ingested.
+### Concurrency
+
+- **Correlation is safe under concurrent `/correlate` calls.** Candidate
+  events are atomically claimed via a single bulk `UPDATE` before any
+  processing; a second concurrent call's identical claim can't see rows
+  already claimed. Nothing commits until the very end, so a crash mid-run
+  releases the claim instead of leaking it. See `run_correlation` in
+  `correlation.py` and `tests/test_correlation_concurrency.py`.
+- **Asset upsert is safe under concurrent first-sightings of a new host.**
+  A case-insensitive unique index (`ix_assets_host_lower`) enforces
+  uniqueness at the database level; a losing insert recovers via a
+  SAVEPOINT + fallback update rather than crashing or duplicating. See
+  `_upsert_asset` in `ingestion.py` and `tests/test_asset_concurrency.py`.
 
 ### What step 1 delivers
 
@@ -170,6 +172,7 @@ The remaining Milestone 1 modules, closing it out as a complete product:
 - `GET /assets?q=&limit=&offset=` — list auto-discovered assets. **Requires any authenticated role.**
 - `PATCH /assets/{id}` — body `{"os"?, "department"?, "owner"?, "criticality"?}`. **Requires admin or analyst role.**
 - `GET /search?q=` — events + incidents + assets matching `q`, ≤10 each. **Requires any authenticated role.**
+- `GET /stats` — dashboard aggregates (event/incident counts, severity distribution, 5 most recent incidents), computed via SQL over the whole table, not a capped sample. **Requires any authenticated role.**
 - `GET /notifications?unread_only=` — the current user's notifications + unread count.
 - `PATCH /notifications/{id}/read`, `POST /notifications/read-all` — mark read.
 
