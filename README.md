@@ -22,6 +22,30 @@ Built in dependency order, since each layer needed the one before it:
 - [x] Step 4 — React dashboard + investigation page
 - [x] **Step 5 — Assets, search, incident workflow, notifications, reports** (this step)
 
+### Known limitations
+
+Found during a post-milestone bug audit and deliberately left as documented
+gaps rather than fixed, since closing them properly is a bigger scope than a
+bug fix:
+
+- **No DB migrations.** `init_db()` only runs `CREATE TABLE IF NOT EXISTS` -
+  it never alters an existing table for new columns. If you have a Postgres
+  volume from before a schema change, drop it (`docker compose down -v`)
+  rather than reusing it. Alembic belongs in a later milestone once the
+  schema is more stable.
+- **Correlation isn't safe under true concurrency.** `run_correlation`
+  reads all uncorrelated events, then writes; two `/correlate` calls firing
+  at the same instant could both grab the same events. Unlikely for a
+  single-analyst-triggered action, but a real fix would need a DB-level
+  lock.
+- **Asset upsert has a narrow race on brand-new hostnames.** Two concurrent
+  first-sightings of the same host in different casing could create two
+  Asset rows instead of merging, since the case-insensitive dedup check and
+  insert aren't atomic. Would need a case-insensitive unique index to close
+  fully.
+- **Dashboard severity chart samples the 500 most recent events**, not the
+  full table, if you have more than that ingested.
+
 ### What step 1 delivers
 
 A real log ingestion pipeline: raw logs from multiple source formats are

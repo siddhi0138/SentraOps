@@ -210,10 +210,20 @@ def run_correlation(db: Session) -> list[Incident]:
         return []
 
     incidents: list[Incident] = []
+    # A low-severity contextual event can match two different clusters' identity
+    # sets at once (e.g. it shares a host with cluster A and a username with an
+    # otherwise-unrelated cluster B). Track claimed events so it's attached to
+    # exactly one incident instead of silently flipping to whichever cluster is
+    # processed last while the earlier incident's report still describes it.
+    claimed_ids: set[int] = set()
 
     for cluster in _cluster_alerts(alerts):
         identity = _identity(cluster)
-        timeline = sorted((e for e in uncorrelated if _matches_identity(e, identity)), key=lambda e: e.timestamp)
+        timeline = sorted(
+            (e for e in uncorrelated if e.id not in claimed_ids and _matches_identity(e, identity)),
+            key=lambda e: e.timestamp,
+        )
+        claimed_ids.update(e.id for e in timeline)
 
         title, confidence = _classify(cluster)
         threat_intel = _lookup_threat_intel(timeline)

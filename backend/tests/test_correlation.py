@@ -80,6 +80,28 @@ def test_correlation_keeps_unrelated_alerts_as_separate_incidents(db_session):
     assert len(incidents) == 2
 
 
+def test_bridging_event_is_claimed_by_exactly_one_incident(db_session):
+    """A low-severity event can match two unrelated clusters' identity sets at
+    once (shares a host with one, a username with the other). It must end up
+    in exactly one incident's persisted timeline, and that incident's report
+    must be the one that actually describes it - not the other way around."""
+    ingest(db_session, "generic", [
+        {"timestamp": "2026-07-24T09:00:00", "host": "HOST-A", "username": "alice", "event_type": "privilege_escalation", "severity": "high", "message": "a1"},
+        {"timestamp": "2026-07-24T09:05:00", "host": "HOST-B", "username": "bob", "event_type": "privilege_escalation", "severity": "high", "message": "b1"},
+        {"timestamp": "2026-07-24T09:10:00", "host": "HOST-A", "username": "bob", "event_type": "login_success", "severity": "low", "message": "bridge"},
+    ])
+
+    incidents = run_correlation(db_session)
+
+    assert len(incidents) == 2
+    assert sum(len(i.events) for i in incidents) == 3  # no event dropped or double-claimed
+
+    for incident in incidents:
+        mentions_bridge_in_report = "bridge" in incident.report
+        has_bridge_in_events = any(e.message == "bridge" for e in incident.events)
+        assert mentions_bridge_in_report == has_bridge_in_events
+
+
 def test_correlation_ignores_low_severity_only_activity(db_session):
     ingest(db_session, "generic", [{
         "timestamp": "2026-07-24T10:00:00",

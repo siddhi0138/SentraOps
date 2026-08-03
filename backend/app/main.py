@@ -137,6 +137,39 @@ def update_user_role(
     return _user_out(user)
 
 
+@app.post("/ingest/upload")
+async def ingest_upload(
+    source_type: str = Query(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst)),
+) -> dict:
+    # Must be registered before /ingest/{source_type} below - otherwise that
+    # route's path-shape matches "/ingest/upload" first (source_type="upload")
+    # and this endpoint is silently unreachable.
+    raw_bytes = await file.read()
+    try:
+        content = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
+
+    if file.filename and file.filename.lower().endswith(".csv"):
+        raw_items: list[Any] = list(csv.DictReader(io.StringIO(content)))
+    else:
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
+        raw_items = parsed if isinstance(parsed, list) else [parsed]
+
+    try:
+        events, skipped = ingest(db, source_type, raw_items)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"ingested": len(events), "skipped": skipped}
+
+
 @app.post("/ingest/{source_type}")
 def ingest_logs(
     source_type: str,
@@ -150,29 +183,6 @@ def ingest_logs(
         raise HTTPException(status_code=400, detail=str(exc))
 
     return {"ingested": len(events), "skipped": skipped, "events": [e.to_dict() for e in events]}
-
-
-@app.post("/ingest/upload")
-async def ingest_upload(
-    source_type: str = Query(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    _user: User = Depends(require_roles(Role.admin, Role.analyst)),
-) -> dict:
-    content = (await file.read()).decode("utf-8")
-
-    if file.filename and file.filename.lower().endswith(".csv"):
-        raw_items: list[Any] = list(csv.DictReader(io.StringIO(content)))
-    else:
-        parsed = json.loads(content)
-        raw_items = parsed if isinstance(parsed, list) else [parsed]
-
-    try:
-        events, skipped = ingest(db, source_type, raw_items)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    return {"ingested": len(events), "skipped": skipped}
 
 
 @app.post("/simulate/{scenario}")
@@ -192,6 +202,16 @@ def simulate(
         results[source_type] = {"ingested": len(events), "skipped": skipped}
 
     return {"scenario": scenario, "sources": results}
+
+
+def _csv_row(row: dict) -> dict:
+    # OWASP CSV injection: a cell starting with =/+/-/@ is executed as a
+    # formula by Excel/Sheets when opened. Log fields (message, host, title,
+    # ...) can contain attacker-controlled text, so neutralize before export.
+    return {
+        key: ("'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@") else value)
+        for key, value in row.items()
+    }
 
 
 def _filter_events(
@@ -265,7 +285,7 @@ def export_events_csv(
     writer = csv.DictWriter(buffer, fieldnames=["id", "timestamp", "host", "username", "source_ip", "event_type", "severity", "message", "source_type", "incident_id"])
     writer.writeheader()
     for event in events:
-        writer.writerow(event.to_dict())
+        writer.writerow(_csv_row(event.to_dict()))
 
     return Response(
         content=buffer.getvalue(),
@@ -323,7 +343,7 @@ def export_incidents_csv(
     writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
     for incident in incidents:
-        writer.writerow(incident.to_summary_dict())
+        writer.writerow(_csv_row(incident.to_summary_dict()))
 
     return Response(
         content=buffer.getvalue(),
@@ -379,6 +399,10 @@ def update_incident(
         raise HTTPException(status_code=404, detail="Incident not found")
 
     updates = payload.model_dump(exclude_unset=True)
+
+    for field in ("status", "priority"):
+        if field in updates and updates[field] is None:
+            raise HTTPException(status_code=400, detail=f"{field} cannot be null")
 
     if "status" in updates:
         incident.status = updates["status"]
@@ -463,7 +487,11 @@ def update_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("criticality", "unset") is None:
+        raise HTTPException(status_code=400, detail="criticality cannot be null")
+
+    for field, value in updates.items():
         setattr(asset, field, value)
 
     db.commit()

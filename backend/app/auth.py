@@ -7,7 +7,7 @@ import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -29,7 +29,10 @@ class Role(str, Enum):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    # Only enforced at registration, not login - an existing account created
+    # before this constraint (or via direct DB seeding) must still be able
+    # to sign in with whatever password it already has.
+    password: str = Field(min_length=8)
 
 
 class UserLogin(BaseModel):
