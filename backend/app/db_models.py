@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -42,6 +42,10 @@ class Event(Base):
     id = Column(Integer, primary_key=True)
     raw_log_id = Column(Integer, ForeignKey("raw_logs.id"), nullable=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True, index=True)
+    # Set atomically by the correlation engine to claim a batch of candidate
+    # events before processing, so two concurrent /correlate calls can't both
+    # grab the same events. Not exposed via to_dict() - purely internal.
+    correlation_claim = Column(String(36), nullable=True, index=True)
 
     timestamp = Column(DateTime(timezone=True), index=True, nullable=False)
     host = Column(String(255), index=True, nullable=False)
@@ -158,7 +162,7 @@ class Asset(Base):
     __tablename__ = "assets"
 
     id = Column(Integer, primary_key=True)
-    host = Column(String(255), unique=True, index=True, nullable=False)
+    host = Column(String(255), index=True, nullable=False)
     first_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     last_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     event_count = Column(Integer, nullable=False, default=0)
@@ -167,6 +171,14 @@ class Asset(Base):
     department = Column(String(100), nullable=True)
     owner = Column(String(255), nullable=True)
     criticality = Column(String(20), nullable=False, default="medium")
+
+    # Case-insensitive uniqueness: the same physical host is routinely logged
+    # with different casing across sources (see correlation.py), and a plain
+    # unique index on `host` would allow "abc" and "ABC" as two separate
+    # rows. Enforced at the DB level (not just app-level dedup logic in
+    # ingestion.py) so a genuine race between two concurrent first-sightings
+    # can't create duplicates either.
+    __table_args__ = (Index("ix_assets_host_lower", func.lower(host), unique=True),)
 
     def to_dict(self) -> dict:
         return {

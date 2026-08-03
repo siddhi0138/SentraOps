@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db_models import Asset, Event, RawLog
@@ -21,20 +22,36 @@ def _as_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
 
 
-def _upsert_asset(db: Session, host: str, timestamp: datetime) -> None:
-    # Hostnames are case-insensitive and the same physical host routinely
-    # shows up with different casing across log sources (see correlation.py).
-    timestamp = _as_utc_naive(timestamp)
-    asset = db.query(Asset).filter(func.lower(Asset.host) == host.lower()).first()
-    if asset is None:
-        db.add(Asset(host=host, first_seen=timestamp, last_seen=timestamp, event_count=1))
-        return
-
+def _apply_sighting(asset: Asset, timestamp: datetime) -> None:
     asset.event_count += 1
     if timestamp > _as_utc_naive(asset.last_seen):
         asset.last_seen = timestamp
     if timestamp < _as_utc_naive(asset.first_seen):
         asset.first_seen = timestamp
+
+
+def _upsert_asset(db: Session, host: str, timestamp: datetime) -> None:
+    # Hostnames are case-insensitive and the same physical host routinely
+    # shows up with different casing across log sources (see correlation.py).
+    timestamp = _as_utc_naive(timestamp)
+    asset = db.query(Asset).filter(func.lower(Asset.host) == host.lower()).first()
+    if asset is not None:
+        _apply_sighting(asset, timestamp)
+        return
+
+    # Race window: a concurrent request could insert this same host (maybe
+    # in different casing) between the SELECT above and this INSERT. The
+    # unique index on lower(host) (see db_models.Asset) turns that into a
+    # clean IntegrityError instead of a duplicate row. A SAVEPOINT scopes
+    # the rollback to just this insert attempt, so the rest of this ingest
+    # batch's pending Event/RawLog rows aren't discarded too.
+    try:
+        with db.begin_nested():
+            db.add(Asset(host=host, first_seen=timestamp, last_seen=timestamp, event_count=1))
+            db.flush()
+    except IntegrityError:
+        asset = db.query(Asset).filter(func.lower(Asset.host) == host.lower()).one()
+        _apply_sighting(asset, timestamp)
 
 
 def ingest(db: Session, source_type: str, raw_items: list[Any]) -> tuple[list[Event], int]:

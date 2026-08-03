@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy.orm import Session
 
 from app.db_models import Event, Incident, Notification, User
@@ -203,10 +205,26 @@ def _generate_report(
 def run_correlation(db: Session) -> list[Incident]:
     """Clusters not-yet-correlated events into incidents and persists them.
     Idempotent-ish: events already assigned to an incident are left alone,
-    so re-running only picks up newly ingested activity."""
-    uncorrelated = db.query(Event).filter(Event.incident_id.is_(None)).order_by(Event.timestamp).all()
+    so re-running only picks up newly ingested activity.
+
+    Safe under concurrent calls: candidate events are atomically claimed via
+    a single bulk UPDATE before any processing. The database's own row/table
+    locking for that UPDATE statement (held for the rest of this
+    transaction) means a second concurrent call's identical UPDATE simply
+    can't see rows this call already claimed - it either blocks until this
+    transaction finishes (Postgres row locks, SQLite's file lock) or, once
+    this one commits, finds those rows no longer match `correlation_claim
+    IS NULL`. Nothing is committed until the very end, so a crash mid-run
+    rolls back the claim too and the events stay available for retry."""
+    claim_id = str(uuid.uuid4())
+    db.query(Event).filter(
+        Event.incident_id.is_(None), Event.correlation_claim.is_(None)
+    ).update({Event.correlation_claim: claim_id}, synchronize_session=False)
+
+    uncorrelated = db.query(Event).filter(Event.correlation_claim == claim_id).order_by(Event.timestamp).all()
     alerts = [e for e in uncorrelated if e.severity in ALERT_SEVERITIES]
     if not alerts:
+        db.rollback()  # nothing to do - release the claim, this run is a no-op
         return []
 
     incidents: list[Incident] = []
@@ -215,6 +233,8 @@ def run_correlation(db: Session) -> list[Incident]:
     # otherwise-unrelated cluster B). Track claimed events so it's attached to
     # exactly one incident instead of silently flipping to whichever cluster is
     # processed last while the earlier incident's report still describes it.
+    # Doubles as the set of events this run actually resolved into an
+    # incident, vs. ones that were claimed as candidates but matched nothing.
     claimed_ids: set[int] = set()
 
     for cluster in _cluster_alerts(alerts):
@@ -252,6 +272,13 @@ def run_correlation(db: Session) -> list[Incident]:
 
         _notify_responders(db, incident)
         incidents.append(incident)
+
+    # Release the claim on any candidate that didn't end up matching a
+    # cluster (e.g. a low-severity event unrelated to every alert in this
+    # batch), so it's still eligible the next time /correlate runs.
+    for event in uncorrelated:
+        if event.id not in claimed_ids:
+            event.correlation_claim = None
 
     db.commit()
     for incident in incidents:
