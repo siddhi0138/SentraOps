@@ -13,4 +13,10 @@ RUN pip install --no-cache-dir --timeout 120 --retries 5 -r requirements.txt
 
 COPY . .
 
+# Bakes the ONNX embedding model into the image at build time instead of
+# downloading it from Hugging Face on the first real request - without
+# this, every fresh container (a redeploy, a restart, a new dev machine)
+# hits a slow/timeout-prone first request while ~90MB downloads live.
+RUN python -c "from app.embeddings import embed_text; embed_text('warm up')"
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
