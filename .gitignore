@@ -4,3 +4,16 @@ __pycache__/
 venv/
 .env
 *.egg-info/
+*.db
+
+# Terraform (deploy/terraform)
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+terraform.tfvars
+*.auto.tfvars
+deploy/terraform/.kind-config.generated.yaml
+deploy/terraform/tfplan
+deploy/terraform/apply*.log

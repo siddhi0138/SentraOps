@@ -1,0 +1,127 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-grafana-datasource
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://{{ include "cybersentinel.fullname" . }}-prometheus:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-grafana-dashboard-provider
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+data:
+  dashboard.yml: |
+    apiVersion: 1
+    providers:
+      - name: CyberSentinel
+        folder: ""
+        type: file
+        options:
+          path: /etc/grafana/provisioning/dashboards/json
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-grafana-dashboard-json
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+data:
+  cybersentinel.json: |
+{{ .Files.Get "files/grafana-dashboard-cybersentinel.json" | indent 4 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-grafana-data
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-grafana
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cybersentinel.name" . }}
+      app.kubernetes.io/component: grafana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "cybersentinel.name" . }}
+        app.kubernetes.io/component: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: {{ .Values.grafana.image }}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ .Values.grafana.adminUser | quote }}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: {{ .Values.grafana.adminPassword | quote }}
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: Viewer
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: datasource
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboard-json
+              mountPath: /etc/grafana/provisioning/dashboards/json
+            - name: data
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: datasource
+          configMap:
+            name: {{ include "cybersentinel.fullname" . }}-grafana-datasource
+        - name: dashboard-provider
+          configMap:
+            name: {{ include "cybersentinel.fullname" . }}-grafana-dashboard-provider
+        - name: dashboard-json
+          configMap:
+            name: {{ include "cybersentinel.fullname" . }}-grafana-dashboard-json
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "cybersentinel.fullname" . }}-grafana-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-grafana
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: {{ include "cybersentinel.name" . }}
+    app.kubernetes.io/component: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: {{ .Values.grafana.nodePort }}

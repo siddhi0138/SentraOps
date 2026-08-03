@@ -1,0 +1,52 @@
+postgres:
+  image: pgvector/pgvector:pg16
+  database: cybersentinel
+  user: cybersentinel
+  storage: 2Gi
+
+redis:
+  image: redis:7-alpine
+
+neo4j:
+  image: neo4j:5.26-community
+  storage: 2Gi
+
+backend:
+  image:
+    repository: cybersentinel-backend
+    tag: local
+    pullPolicy: Never
+  replicas: 1
+  nodePort: 30080
+  corsOrigins: "*"
+  groqModel: llama-3.3-70b-versatile
+
+celeryWorker:
+  replicas: 1
+
+frontend:
+  image:
+    repository: cybersentinel-frontend
+    tag: local
+    pullPolicy: Never
+  replicas: 1
+  nodePort: 30081
+
+prometheus:
+  image: prom/prometheus:v2.55.1
+  nodePort: 30090
+  storage: 1Gi
+
+grafana:
+  image: grafana/grafana:11.3.1
+  nodePort: 30001
+  adminUser: admin
+  adminPassword: admin
+
+# Overridden per-environment (Terraform passes these via set_sensitive rather
+# than committing real values here - see deploy/terraform/variables.tf).
+secrets:
+  postgresPassword: cybersentinel
+  neo4jPassword: cybersentinel
+  jwtSecretKey: dev-only-insecure-secret-key-change-me-in-production
+  groqApiKey: ""
