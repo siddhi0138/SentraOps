@@ -98,6 +98,59 @@ def lookup_many(db: Session, values: list[str | None]) -> dict[str, ThreatIndica
     return {lowered[row.indicator.lower()]: row for row in rows}
 
 
+def _looks_like_external_indicator(value: str) -> bool:
+    """Filters out internal asset names (FINANCE-PC-21, db-server-03)
+    before ever attempting a live lookup - those aren't real public
+    IPs/domains VirusTotal or AbuseIPDB could ever have data on, and
+    calling anyway would just burn through the free-tier rate limit on
+    guaranteed 404s. A real public IP always qualifies; a bare hostname
+    only qualifies if it has a domain-shaped tail (an alphabetic TLD-like
+    last segment, e.g. "evil-domain.com") - internal hostnames essentially
+    never do."""
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        pass
+    if "." not in value:
+        return False
+    tld = value.rsplit(".", 1)[-1]
+    return tld.isalpha() and len(tld) >= 2
+
+
+def lookup_many_with_live_fallback(db: Session, values: list[str | None]) -> dict[str, ThreatIndicator]:
+    """Same as lookup_many, but for any candidate not already known
+    locally, tries a real live lookup (VirusTotal/AbuseIPDB - see
+    app/threat_intel_providers.py) if an API key is configured, upserting
+    a genuine hit so it's cached in the shared indicator table and never
+    re-fetched from the live API again. A strict superset of lookup_many's
+    existing behavior: with no keys configured (the default), this
+    produces identical results to calling lookup_many alone."""
+    from app.threat_intel_providers import live_lookup
+
+    hits = lookup_many(db, values)
+    known_lower = {h.indicator.lower() for h in hits.values()}
+
+    for value in {v for v in values if v}:
+        if value.lower() in known_lower or not _looks_like_external_indicator(value):
+            continue
+        live = live_lookup(value, indicator_type_of(value))
+        if not live:
+            continue
+        row = upsert_indicator(
+            db,
+            indicator=value,
+            indicator_type=indicator_type_of(value),
+            verdict=live["verdict"],
+            confidence=live["confidence"],
+            source=live["source"],
+        )
+        hits[value] = row
+        known_lower.add(value.lower())
+
+    return hits
+
+
 def search(db: Session, q: str | None = None, indicator_type: str | None = None, limit: int = 50) -> list[ThreatIndicator]:
     query = db.query(ThreatIndicator)
     if q:

@@ -247,3 +247,67 @@ def test_threat_intel_graph_returns_503_when_neo4j_unavailable(client, viewer_he
 def test_threat_intel_graph_endpoints_require_authentication(client):
     assert client.get("/threat-intel/graph").status_code == 401
     assert client.post("/threat-intel/graph/sync").status_code == 401
+
+
+# --- live VirusTotal/AbuseIPDB fallback ---------------------------------------
+
+
+def test_looks_like_external_indicator():
+    from app.threat_intel_hub import _looks_like_external_indicator
+
+    assert _looks_like_external_indicator("185.220.101.45") is True
+    assert _looks_like_external_indicator("evil-domain.com") is True
+    assert _looks_like_external_indicator("FINANCE-PC-21") is False
+    assert _looks_like_external_indicator("db-server-03") is False
+    assert _looks_like_external_indicator("svc_update") is False
+
+
+def test_lookup_many_with_live_fallback_uses_local_match_first(db_session):
+    from app.threat_intel_hub import lookup_many_with_live_fallback
+
+    upsert_indicator(db_session, indicator="185.220.101.45", indicator_type="ip", verdict="known bad", confidence=90, source="URLhaus (abuse.ch)")
+    db_session.commit()
+
+    with patch("app.threat_intel_providers.live_lookup") as mock_live:
+        hits = lookup_many_with_live_fallback(db_session, ["185.220.101.45", "FINANCE-PC-21"])
+
+    assert "185.220.101.45" in hits
+    assert hits["185.220.101.45"].source == "URLhaus (abuse.ch)"  # local match, not overwritten
+    mock_live.assert_not_called()  # already known locally, no live call needed
+
+
+def test_lookup_many_with_live_fallback_calls_live_lookup_for_unknown_external_ip(db_session):
+    from app.threat_intel_hub import lookup_many_with_live_fallback
+
+    fake_result = {"verdict": "VirusTotal: 5 vendor(s) flagged malicious", "confidence": 75, "source": "VirusTotal (Live)"}
+    with patch("app.threat_intel_providers.live_lookup", return_value=fake_result) as mock_live:
+        hits = lookup_many_with_live_fallback(db_session, ["203.0.113.9", "FINANCE-PC-21", None])
+
+    mock_live.assert_called_once_with("203.0.113.9", "ip")
+    assert hits["203.0.113.9"].source == "VirusTotal (Live)"
+    assert hits["203.0.113.9"].confidence == 75
+
+    # And it's now cached locally - a second call must not hit the live API again.
+    with patch("app.threat_intel_providers.live_lookup") as mock_live_again:
+        lookup_many_with_live_fallback(db_session, ["203.0.113.9"])
+    mock_live_again.assert_not_called()
+
+
+def test_lookup_many_with_live_fallback_skips_internal_hostnames(db_session):
+    from app.threat_intel_hub import lookup_many_with_live_fallback
+
+    with patch("app.threat_intel_providers.live_lookup") as mock_live:
+        hits = lookup_many_with_live_fallback(db_session, ["FINANCE-PC-21", "db-server-03", "svc_update"])
+
+    mock_live.assert_not_called()
+    assert hits == {}
+
+
+def test_lookup_many_with_live_fallback_behaves_like_lookup_many_when_nothing_configured(db_session):
+    from app.threat_intel_hub import lookup_many_with_live_fallback
+
+    # live_lookup itself returns None with no keys configured (real
+    # behavior, not mocked) - so an unknown external-looking IP with no
+    # local match just comes back empty, identical to plain lookup_many.
+    hits = lookup_many_with_live_fallback(db_session, ["203.0.113.9"])
+    assert hits == {}

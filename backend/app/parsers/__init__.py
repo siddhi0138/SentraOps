@@ -9,6 +9,11 @@ PARSERS: dict[str, Callable] = {
     "firewall": firewall.parse,
     "cloudtrail": cloudtrail.parse,
     "generic": generic.parse,
+    # BAS (app/bas.py) already emits normalized events in exactly generic's
+    # shape - a distinct source_type key (not reusing "generic" itself)
+    # just so ingested events are visibly tagged as real-technique-execution
+    # output rather than an arbitrary generic upload.
+    "bas": generic.parse,
 }
 
 
