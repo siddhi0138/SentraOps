@@ -8,8 +8,8 @@ COPY requirements.txt .
 # use since it has no GPU - install the CPU-only build first so the later
 # `pip install -r requirements.txt` finds torch already satisfied and never
 # reaches for the CUDA one.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout 120 --retries 5 torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir --timeout 120 --retries 5 -r requirements.txt
 
 COPY . .
 

@@ -10,7 +10,12 @@ def _get_model():
     # (and so the first real call, not module import, pays the load cost).
     from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(MODEL_NAME)
+    # backend="onnx" runs inference through ONNX Runtime instead of full
+    # PyTorch - same model, same output, but without PyTorch's own runtime
+    # overhead sitting in memory alongside it. Needed to fit this process
+    # in a 512MB container (confirmed via testing: the plain PyTorch path
+    # OOMs there the first time this function is actually called).
+    return SentenceTransformer(MODEL_NAME, backend="onnx")
 
 
 def embed_text(text: str) -> list[float]:
