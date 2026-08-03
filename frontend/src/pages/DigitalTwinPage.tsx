@@ -2,9 +2,18 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { AttackGraphView } from '../components/AttackGraphView'
 import { StatCard } from '../components/StatCard'
+import { usePersistentState } from '../hooks/usePersistentState'
 import type { DigitalTwinNarrative, DigitalTwinSimulation } from '../api/types'
 
 type EntityType = 'host' | 'user' | 'ip'
+
+interface TwinState {
+  entityType: EntityType
+  entityValue: string
+  hops: number
+  simulation: DigitalTwinSimulation | null
+  narrative: DigitalTwinNarrative | null
+}
 
 const CONFIDENCE_COLOR: Record<string, string> = {
   low: 'text-muted-foreground',
@@ -13,23 +22,40 @@ const CONFIDENCE_COLOR: Record<string, string> = {
 }
 
 export function DigitalTwinPage() {
-  const [entityType, setEntityType] = useState<EntityType>('host')
-  const [entityValue, setEntityValue] = useState('')
-  const [hops, setHops] = useState(2)
+  // Real generated simulations/narratives, kept across a refresh like the
+  // rest of this app's AI output - previously this whole page silently
+  // re-ran the default auto-simulation on every reload, discarding
+  // whatever the user had actually asked for.
+  const [twin, setTwin] = usePersistentState<TwinState>('digital-twin-state')
+  const entityType = twin?.entityType ?? 'host'
+  const entityValue = twin?.entityValue ?? ''
+  const hops = twin?.hops ?? 2
+  const simulation = twin?.simulation ?? null
+  const narrative = twin?.narrative ?? null
 
-  const [simulation, setSimulation] = useState<DigitalTwinSimulation | null>(null)
-  const [narrative, setNarrative] = useState<DigitalTwinNarrative | null>(null)
   const [simulating, setSimulating] = useState(false)
   const [narrating, setNarrating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  function patchTwin(patch: Partial<TwinState>) {
+    setTwin((prev) => ({
+      entityType: prev?.entityType ?? 'host',
+      entityValue: prev?.entityValue ?? '',
+      hops: prev?.hops ?? 2,
+      simulation: prev?.simulation ?? null,
+      narrative: prev?.narrative ?? null,
+      ...patch,
+    }))
+  }
 
   async function runSimulate(type: EntityType, value: string, hopsValue: number) {
     if (!value.trim()) return
     setSimulating(true)
     setError(null)
-    setNarrative(null)
+    patchTwin({ entityType: type, entityValue: value, hops: hopsValue, narrative: null })
     try {
-      setSimulation(await api.simulateCompromise(type, value.trim(), hopsValue))
+      const result = await api.simulateCompromise(type, value.trim(), hopsValue)
+      patchTwin({ entityType: type, entityValue: value, hops: hopsValue, simulation: result, narrative: null })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Simulation failed')
     } finally {
@@ -43,16 +69,18 @@ export function DigitalTwinPage() {
 
   // The page is a query tool, not a dashboard - it has nothing to show until
   // someone picks an entity. Auto-fill with this org's most-referenced real
-  // host and run it once on load, so the page isn't a blank form the first
-  // time anyone opens it (real data, not a fabricated placeholder).
+  // host and run it once, the first time this page is ever opened in this
+  // session (real data, not a fabricated placeholder) - but only when there
+  // is no persisted state yet, so it never overwrites what the user already
+  // generated on a later visit/refresh.
   useEffect(() => {
+    if (twin) return
     let cancelled = false
     api
       .listAssets({ limit: 20 })
       .then((res) => {
         if (cancelled || res.assets.length === 0) return
         const top = [...res.assets].sort((a, b) => b.event_count - a.event_count)[0].host
-        setEntityValue(top)
         void runSimulate('host', top, 2)
       })
       .catch(() => {})
@@ -68,8 +96,7 @@ export function DigitalTwinPage() {
     setError(null)
     try {
       const res = await api.getDigitalTwinNarrative(entityType, entityValue.trim(), hops)
-      setSimulation(res.simulation)
-      setNarrative(res.narrative)
+      patchTwin({ simulation: res.simulation, narrative: res.narrative })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to generate narrative')
     } finally {
@@ -92,7 +119,7 @@ export function DigitalTwinPage() {
           <label className="block text-xs text-muted-foreground mb-1">Entity type</label>
           <select
             value={entityType}
-            onChange={(e) => setEntityType(e.target.value as EntityType)}
+            onChange={(e) => patchTwin({ entityType: e.target.value as EntityType })}
             className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground"
           >
             <option value="host">Host</option>
@@ -104,7 +131,7 @@ export function DigitalTwinPage() {
           <label className="block text-xs text-muted-foreground mb-1">Value</label>
           <input
             value={entityValue}
-            onChange={(e) => setEntityValue(e.target.value)}
+            onChange={(e) => patchTwin({ entityValue: e.target.value })}
             onKeyDown={(e) => e.key === 'Enter' && void handleSimulate()}
             placeholder="e.g. FINANCE-PC-21"
             className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground"
@@ -117,7 +144,7 @@ export function DigitalTwinPage() {
             min={1}
             max={4}
             value={hops}
-            onChange={(e) => setHops(Number(e.target.value))}
+            onChange={(e) => patchTwin({ hops: Number(e.target.value) })}
             className="w-16 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground"
           />
         </div>

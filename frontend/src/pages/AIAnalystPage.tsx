@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { MessageSquarePlus } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
+import { usePersistentState } from '../hooks/usePersistentState'
 import type { RagResult } from '../api/types'
 
 interface ChatMessage {
@@ -9,6 +11,7 @@ interface ChatMessage {
   content: string
   sources?: RagResult[]
   error?: boolean
+  confidence?: 'low' | 'medium' | 'high'
 }
 
 const EXAMPLE_QUESTIONS = [
@@ -17,6 +20,21 @@ const EXAMPLE_QUESTIONS = [
   'Which users look compromised?',
   'What is privilege escalation?',
 ]
+
+// Independently cross-checks the RAG evidence's own semantic-similarity
+// score against whether those same entities are actually connected in the
+// real Neo4j attack graph (backend/app/confidence.py) - so this badge means
+// "two different evidence sources agree", not just "the LLM sounded sure".
+const CONFIDENCE_STYLE: Record<'low' | 'medium' | 'high', { label: string; className: string }> = {
+  high: { label: 'High confidence · graph & evidence agree', className: 'text-primary border-primary/40 bg-primary/10' },
+  medium: { label: 'Medium confidence · partially corroborated', className: 'text-severity-high border-severity-high/40 bg-severity-high/10' },
+  low: { label: 'Low confidence · unverified', className: 'text-muted-foreground border-border bg-secondary' },
+}
+
+function ConfidenceBadge({ confidence }: { confidence: 'low' | 'medium' | 'high' }) {
+  const style = CONFIDENCE_STYLE[confidence]
+  return <span className={`inline-block px-2 py-0.5 rounded border text-[11px] font-medium ${style.className}`}>{style.label}</span>
+}
 
 function SourceChip({ source }: { source: RagResult }) {
   const label = source.content_id ? `${source.content_type} #${source.content_id}` : source.content_type
@@ -33,10 +51,23 @@ function SourceChip({ source }: { source: RagResult }) {
 }
 
 export function AIAnalystPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  // Real conversation content, kept across a refresh like the rest of this
+  // app's AI-generated output - it only clears when "New chat" is clicked,
+  // not silently on reload.
+  const [persistedMessages, setPersistedMessages] = usePersistentState<ChatMessage[]>('ai-analyst-chat')
+  const messages = persistedMessages ?? []
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  function setMessages(update: (prev: ChatMessage[]) => ChatMessage[]) {
+    setPersistedMessages((prev) => update(prev ?? []))
+  }
+
+  function newChat() {
+    setPersistedMessages(null)
+    setInput('')
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -52,7 +83,10 @@ export function AIAnalystPage() {
 
     try {
       const response = await api.chat(trimmed)
-      setMessages((prev) => [...prev, { role: 'assistant', content: response.answer, sources: response.sources }])
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: response.answer, sources: response.sources, confidence: response.confidence },
+      ])
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to reach the AI analyst'
       setMessages((prev) => [...prev, { role: 'assistant', content: message, error: true }])
@@ -68,7 +102,18 @@ export function AIAnalystPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
-      <h1 className="text-lg font-semibold text-foreground mb-4">AI Security Analyst</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-lg font-semibold text-foreground">AI Security Analyst</h1>
+        {messages.length > 0 && (
+          <button
+            onClick={newChat}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary transition"
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+            New chat
+          </button>
+        )}
+      </div>
 
       <div className="flex-1 overflow-y-auto panel p-4 space-y-4">
         {messages.length === 0 && (
@@ -108,6 +153,12 @@ export function AIAnalystPage() {
                 </div>
               ) : (
                 <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
+
+              {message.role === 'assistant' && !message.error && message.confidence && (
+                <div className="mt-2">
+                  <ConfidenceBadge confidence={message.confidence} />
+                </div>
               )}
 
               {message.sources && message.sources.length > 0 && (

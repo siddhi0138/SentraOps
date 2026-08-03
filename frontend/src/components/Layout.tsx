@@ -5,6 +5,7 @@ import {
   Bot,
   Building2,
   ChevronsUpDown,
+  Compass,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -15,10 +16,11 @@ import {
   ShieldAlert,
   Sun,
 } from 'lucide-react'
-import type { ComponentType, CSSProperties } from 'react'
+import { useEffect, type ComponentType, type CSSProperties } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../theme/ThemeContext'
+import { hasSeenTour, useAppTour } from './AppTour'
 import { NotificationBell } from './NotificationBell'
 import { SearchBar } from './SearchBar'
 import {
@@ -49,28 +51,33 @@ interface NavItem {
   // while you're on any tab within it (e.g. /assets should still light up
   // "Investigate", not just its landing route /events).
   matches: string[]
+  // Stable selector for AppTour to anchor a step to, independent of label
+  // text (which the tour copy also changes over time).
+  tourId: string
 }
 
 // Seven destinations, not eighteen - each one that used to be its own
 // sidebar entry is now a tab inside one of these (see SectionLayout).
 const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true, matches: ['/'] },
-  { to: '/command-center', label: 'Command Center', icon: Radar, matches: ['/command-center'] },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true, matches: ['/'], tourId: 'dashboard' },
+  { to: '/command-center', label: 'Command Center', icon: Radar, matches: ['/command-center'], tourId: 'command-center' },
   {
     to: '/events',
     label: 'Investigate',
     icon: Search,
     matches: ['/events', '/incidents', '/assets', '/attack-graph', '/digital-twin'],
+    tourId: 'investigate',
   },
   {
     to: '/ai-team',
     label: 'AI Team',
     icon: Bot,
     matches: ['/ai-team', '/ai-analyst', '/ai-observability', '/learning', '/marketplace'],
+    tourId: 'ai-team',
   },
-  { to: '/threat-intel', label: 'Threat Intel', icon: ShieldAlert, matches: ['/threat-intel', '/predictive'] },
-  { to: '/executive', label: 'Reports', icon: BarChart3, matches: ['/executive', '/compliance'] },
-  { to: '/integrations', label: 'Settings', icon: Settings, matches: ['/integrations', '/admin'] },
+  { to: '/threat-intel', label: 'Threat Intel', icon: ShieldAlert, matches: ['/threat-intel', '/predictive'], tourId: 'threat-intel' },
+  { to: '/executive', label: 'Reports', icon: BarChart3, matches: ['/executive', '/compliance'], tourId: 'reports' },
+  { to: '/integrations', label: 'Settings', icon: Settings, matches: ['/integrations', '/admin'], tourId: 'settings' },
 ]
 
 function activeItem(pathname: string): NavItem | undefined {
@@ -125,6 +132,19 @@ export function Layout() {
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
   const current = activeItem(location.pathname)
+  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const { startTour } = useAppTour(canAct)
+
+  // Layout mounts once per session (React Router keeps it mounted across
+  // route changes, only <Outlet/> swaps) - fires once for a genuinely new
+  // browser, not on every navigation. Small delay so the tour doesn't
+  // measure elements before the first real layout/paint settles.
+  useEffect(() => {
+    if (hasSeenTour()) return
+    const timer = setTimeout(() => startTour(), 800)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <SidebarProvider
@@ -132,7 +152,7 @@ export function Layout() {
     >
       <Sidebar collapsible="icon">
         <SidebarHeader className="px-3 py-3">
-          <div className="flex items-center gap-2 px-1">
+          <div data-tour="brand" className="flex items-center gap-2 px-1">
             <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary glow-primary">
               <Activity className="h-4 w-4 text-glow" />
               <span className="absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-severity-low pulse-dot" />
@@ -157,7 +177,7 @@ export function Layout() {
                         size="lg"
                         className="rounded-none border-l-2 border-transparent pl-3 text-[15px] gap-3 data-[active=true]:border-primary data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:text-glow group-data-[collapsible=icon]:size-11! group-data-[collapsible=icon]:p-2!"
                         render={
-                          <NavLink to={item.to} end={item.end}>
+                          <NavLink to={item.to} end={item.end} data-tour={`nav-${item.tourId}`}>
                             <item.icon className="h-5 w-5 shrink-0" />
                             <span className="truncate group-data-[collapsible=icon]:hidden">{item.label}</span>
                           </NavLink>
@@ -174,7 +194,10 @@ export function Layout() {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <button className="flex w-full items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-2 py-2 text-left text-sm hover:bg-sidebar-accent transition group-data-[collapsible=icon]:justify-center" />
+                <button
+                  data-tour="user-menu"
+                  className="flex w-full items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-2 py-2 text-left text-sm hover:bg-sidebar-accent transition group-data-[collapsible=icon]:justify-center"
+                />
               }
             >
               <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[11px] font-medium text-primary">
@@ -198,6 +221,10 @@ export function Layout() {
                 {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 {theme === 'dark' ? 'Light mode' : 'Dark mode'}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={startTour}>
+                <Compass className="h-4 w-4" />
+                Take a tour
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={logout}>
                 <LogOut className="h-4 w-4" />
                 Log out
@@ -220,10 +247,12 @@ export function Layout() {
             </Badge>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            <div className="hidden sm:block">
+            <div data-tour="search" className="hidden sm:block">
               <SearchBar />
             </div>
-            <NotificationBell />
+            <div data-tour="notifications">
+              <NotificationBell />
+            </div>
           </div>
         </header>
         <main className="relative flex-1 overflow-y-auto px-4 py-4 pb-20 sm:px-6 sm:py-6 sm:pb-6">

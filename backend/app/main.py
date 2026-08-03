@@ -5,13 +5,15 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Literal
+from urllib.parse import parse_qs
 
+import httpx
 import redis.asyncio as aioredis
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from prometheus_fastapi_instrumentator import Instrumentator
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -60,7 +62,17 @@ from app.agents.coordinator import run_investigation
 from app.agents.runner import gather_investigation_inputs, mark_run_failed, persist_investigation_result
 from app.agents.memory import build_memory_context
 from app.ai import ChatConfigError, ChatProviderError, answer_question, explain_event, explain_incident, translate_query
+from app.confidence import compute_dual_evidence_confidence
 from app.graph import get_entity_blast_radius, get_full_graph, get_incident_subgraph, resync_graph
+from app.slack_bot import handle_investigate_button, handle_review_action_button, handle_slash_command
+from app.slack_oauth import (
+    FRONTEND_URL,
+    build_authorize_url,
+    exchange_code_for_token,
+    sign_oauth_state,
+    verify_oauth_state,
+    verify_slack_signature,
+)
 from app.ingestion import ingest
 from app.plugins import registry as plugin_registry
 from app.progress import REDIS_URL, channel_name
@@ -1095,6 +1107,37 @@ def list_connectors(
     return {"connectors": [c.to_dict() for c in instances]}
 
 
+class ConnectorConfigUpdate(BaseModel):
+    config: dict
+
+
+@app.patch("/connectors/{connector_id}")
+def update_connector_config(
+    connector_id: int,
+    payload: ConnectorConfigUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+) -> dict:
+    """Merges the given keys into the connector's existing config rather
+    than replacing it wholesale - lets one extra setting (e.g. Slack's
+    critical_channel, see app/slack_bot.py's _maybe_post_to_critical_channel)
+    be added after an OAuth install without an admin ever seeing or
+    re-entering the access_token/team_id/etc. they never typed in
+    themselves."""
+    instance = _get_scoped_or_404(db, ConnectorInstance, connector_id, user.organization_id, "Connector not found")
+    merged = {**(instance.config or {}), **payload.config}
+    # A changed critical_channel invalidates any previously cached
+    # critical_channel_id - otherwise notify_new_incident would keep
+    # posting to the *old* channel until some other trigger happened to
+    # clear it.
+    if "critical_channel" in payload.config:
+        merged.pop("critical_channel_id", None)
+    instance.config = merged
+    db.commit()
+    db.refresh(instance)
+    return instance.to_dict()
+
+
 @app.post("/connectors/{connector_id}/test")
 def test_connector(
     connector_id: int,
@@ -1137,6 +1180,162 @@ def sync_connector(
     db.commit()
     db.refresh(instance)
     return {"connector": instance.to_dict(), "ingested": len(events), "skipped": skipped}
+
+
+def _slack_authorize_redirect_uri(request: Request) -> str:
+    # Must byte-for-byte match the "Redirect URLs" entry configured on the
+    # Slack app, both here and in exchange_code_for_token below - Slack
+    # rejects a token exchange whose redirect_uri doesn't match the one used
+    # on the authorize step.
+    return str(request.base_url).rstrip("/") + "/connectors/slack/callback"
+
+
+@app.get("/connectors/slack/authorize")
+def slack_authorize(
+    request: Request,
+    token: str = Query(..., description="Access token - passed as a query param since this is a full-page browser redirect, not a fetch()"),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Step 1 of the OAuth install: an admin clicks 'Connect to Slack' in
+    the Integrations page, which is a plain <a href> navigation (no
+    Authorization header on a browser redirect), so the JWT travels as a
+    query param instead - same reasoning as the /ws/agent-runs WebSocket
+    auth just above."""
+    user_id = decode_token(token, "access")
+    user = db.get(User, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only an organization admin can connect Slack")
+
+    state = sign_oauth_state(user.organization_id, user.id)
+    url = build_authorize_url(state, _slack_authorize_redirect_uri(request))
+    return RedirectResponse(url)
+
+
+@app.get("/connectors/slack/callback")
+def slack_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Step 2: Slack redirects the admin's browser here after they approve
+    the install on Slack's own consent screen - unauthenticated by design
+    (Slack, not our frontend, drives this request), so `state` (see
+    app/slack_oauth.py) is the only thing re-associating this callback with
+    the organization/admin that started the flow."""
+    if error or not code or not state:
+        return RedirectResponse(f"{FRONTEND_URL}/integrations?slack=error")
+
+    try:
+        claims = verify_oauth_state(state)
+    except Exception:
+        return RedirectResponse(f"{FRONTEND_URL}/integrations?slack=error")
+
+    try:
+        token_response = exchange_code_for_token(code, _slack_authorize_redirect_uri(request))
+    except Exception:
+        return RedirectResponse(f"{FRONTEND_URL}/integrations?slack=error")
+
+    if not token_response.get("ok"):
+        return RedirectResponse(f"{FRONTEND_URL}/integrations?slack=error")
+
+    organization_id = claims["org_id"]
+    team = token_response.get("team", {})
+    incoming_webhook = token_response.get("incoming_webhook", {})
+    config = {
+        "access_token": token_response.get("access_token"),
+        "team_id": team.get("id"),
+        "team_name": team.get("name"),
+        "bot_user_id": token_response.get("bot_user_id"),
+        "channel_id": incoming_webhook.get("channel_id"),
+        "channel_name": incoming_webhook.get("channel"),
+        "incoming_webhook_url": incoming_webhook.get("url"),
+        "installed_by_user_id": claims["user_id"],
+    }
+
+    # Re-installing (e.g. to change the channel) updates the existing row
+    # rather than creating a duplicate connector for the same org+workspace.
+    existing = (
+        db.query(ConnectorInstance)
+        .filter(ConnectorInstance.organization_id == organization_id, ConnectorInstance.plugin_key == "slack")
+        .first()
+    )
+    if existing:
+        existing.config = config
+        existing.enabled = True
+        existing.name = f"Slack ({team.get('name', 'workspace')})"
+    else:
+        db.add(ConnectorInstance(
+            organization_id=organization_id,
+            plugin_key="slack",
+            name=f"Slack ({team.get('name', 'workspace')})",
+            config=config,
+        ))
+    db.commit()
+
+    return RedirectResponse(f"{FRONTEND_URL}/integrations?slack=connected")
+
+
+async def _read_verified_slack_body(request: Request) -> bytes:
+    body = await request.body()
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    signature = request.headers.get("X-Slack-Signature", "")
+    if not verify_slack_signature(timestamp, body, signature):
+        raise HTTPException(status_code=401, detail="Invalid Slack request signature")
+    return body
+
+
+@app.post("/slack/commands")
+async def slack_commands(request: Request, db: Session = Depends(get_db)) -> dict:
+    """The single endpoint behind every `/sentraops ...` slash command -
+    Slack always POSTs form-encoded data here regardless of which command
+    was typed; the command text itself (e.g. "investigate 421") is what
+    branches the behavior (see app/slack_bot.py.handle_slash_command)."""
+    body = await _read_verified_slack_body(request)
+    form = parse_qs(body.decode())
+    team_id = form.get("team_id", [""])[0]
+    text = form.get("text", [""])[0]
+    return handle_slash_command(db, team_id, text)
+
+
+@app.post("/slack/interactions")
+async def slack_interactions(request: Request, db: Session = Depends(get_db)) -> dict:
+    """Backs every interactive button click (Investigate / Approve / Reject)
+    from messages app/slack_bot.py posts. Slack expects an HTTP 200 within
+    3 seconds; the actual result is best-effort posted back to `response_url`
+    so a slow investigation kickoff doesn't need to block this response."""
+    body = await _read_verified_slack_body(request)
+    form = parse_qs(body.decode())
+    raw_payload = form.get("payload", ["{}"])[0]
+    payload = json.loads(raw_payload)
+
+    team_id = (payload.get("team") or {}).get("id", "")
+    slack_user = (payload.get("user") or {}).get("username", "someone")
+    response_url = payload.get("response_url")
+    actions = payload.get("actions") or []
+    if not actions:
+        return {}
+
+    action = actions[0]
+    action_id = action.get("action_id")
+    value = action.get("value", "")
+
+    if action_id == "investigate_incident":
+        result_text = handle_investigate_button(db, team_id, value)
+    elif action_id == "review_action":
+        result_text = handle_review_action_button(db, team_id, value, slack_user)
+    else:
+        return {}
+
+    if response_url:
+        try:
+            httpx.post(response_url, json={"replace_original": False, "text": result_text}, timeout=5)
+        except httpx.HTTPError:
+            pass
+    return {}
 
 
 class ResponseActionInstanceCreate(BaseModel):
@@ -1810,7 +2009,9 @@ def chat(
     except ChatProviderError as exc:
         raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
 
-    return {"question": payload.question, "answer": answer, "sources": evidence}
+    confidence = compute_dual_evidence_confidence(db, user.organization_id, evidence)
+
+    return {"question": payload.question, "answer": answer, "sources": evidence, **confidence}
 
 
 class QueryRequest(BaseModel):

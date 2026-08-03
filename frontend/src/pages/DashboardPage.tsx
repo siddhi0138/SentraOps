@@ -152,7 +152,7 @@ export function DashboardPage() {
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 {canAct && (
-                  <Button onClick={handleSimulateAndCorrelate} disabled={working}>
+                  <Button data-tour="simulate-button" onClick={handleSimulateAndCorrelate} disabled={working}>
                     <Zap className="h-4 w-4" />
                     {working ? 'Running…' : 'Simulate attack + correlate'}
                   </Button>
@@ -173,7 +173,7 @@ export function DashboardPage() {
         </div>
 
         {/* AI Analyst quick status - real latest run, not a fabricated gauge */}
-        <div className="panel p-6">
+        <div data-tour="ai-analyst-panel" className="panel p-6">
           <div className="flex items-center gap-2">
             <Bot className="h-4 w-4 text-primary" />
             <h3 className="text-sm font-semibold">AI Analyst</h3>

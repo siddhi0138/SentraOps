@@ -37,6 +37,14 @@ def run_investigation_job(db, run_id: int, incident_id: int) -> None:
     """The actual work, independent of Celery - lets tests call this
     directly with a known db session instead of going through `.delay()`
     when they just want to check persistence behavior."""
+    # Local import: app.slack_bot imports app.tasks (investigate_incident_task,
+    # for the Slack "/sentraops investigate" command and Investigate button),
+    # so importing it back at this module's top level would be a circular
+    # import - deferring to call time sidesteps it, same pattern
+    # app/correlation.py and app/agents/runner.py already use for the same
+    # reason.
+    from app.slack_bot import notify_agent_progress, notify_run_failed
+
     run = db.get(AgentRun, run_id)
     incident = db.get(Incident, incident_id)
     if run is None or incident is None:
@@ -54,13 +62,25 @@ def run_investigation_job(db, run_id: int, incident_id: int) -> None:
                 run_id,
                 {"type": "agent_completed", "run_id": run_id, "agent": agent_name, "message": last_message},
             )
+            try:
+                notify_agent_progress(db, run, incident, agent_name, last_message)
+            except Exception:
+                pass
     except ChatConfigError:
         mark_run_failed(db, run, "GROQ_API_KEY is not set")
         publish_progress(run_id, {"type": "failed", "run_id": run_id, "error": run.error})
+        try:
+            notify_run_failed(db, run, incident, run.error)
+        except Exception:
+            pass
         return
     except ChatProviderError as exc:
         mark_run_failed(db, run, str(exc))
         publish_progress(run_id, {"type": "failed", "run_id": run_id, "error": run.error})
+        try:
+            notify_run_failed(db, run, incident, run.error)
+        except Exception:
+            pass
         return
 
     persist_investigation_result(db, run, incident_id, final_state)
@@ -85,5 +105,19 @@ def consume_ingest_stream_task(organization_id: int) -> None:
     db = _session_factory()
     try:
         consume_available(db, organization_id)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="daily_slack_summaries_task")
+def daily_slack_summaries_task() -> None:
+    """Celery Beat hook (app/celery_app.py's beat_schedule) - fires once a
+    day, no request/user behind it, so it goes straight to app/slack_bot.py
+    rather than through any endpoint."""
+    from app.slack_bot import send_daily_summaries
+
+    db = _session_factory()
+    try:
+        send_daily_summaries(db)
     finally:
         db.close()

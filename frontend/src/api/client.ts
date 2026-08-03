@@ -85,6 +85,14 @@ export function clearTokens(): void {
   localStorage.removeItem(REFRESH_KEY)
 }
 
+// A plain browser navigation (<a href>), not a fetch() - GET
+// /connectors/slack/authorize needs the JWT as a query param instead of an
+// Authorization header, since a full-page redirect can't set custom
+// headers. See backend/app/main.py's slack_authorize docstring.
+export function slackAuthorizeUrl(): string {
+  return `${API_BASE}/connectors/slack/authorize?token=${encodeURIComponent(getAccessToken() ?? '')}`
+}
+
 async function refreshAccessToken(): Promise<boolean> {
   const refresh_token = getRefreshToken()
   if (!refresh_token) return false
@@ -272,6 +280,8 @@ export const api = {
     request<{ connector: ConnectorInstance; ingested: number; skipped: number }>(`/connectors/${id}/sync`, {
       method: 'POST',
     }),
+  updateConnectorConfig: (id: number, config: Record<string, string>) =>
+    request<ConnectorInstance>(`/connectors/${id}`, { method: 'PATCH', body: { config } }),
   listResponseActionInstances: () =>
     request<{ actions: ResponseActionInstance[] }>('/response-action-instances'),
   createResponseActionInstance: (payload: { plugin_key: string; name: string; config: Record<string, string> }) =>

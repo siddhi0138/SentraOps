@@ -73,7 +73,29 @@ def persist_investigation_result(db: Session, run: AgentRun, incident_id: int, f
     if duration is not None:
         agent_investigation_duration_seconds.observe(duration)
 
+    _notify_slack_actions(db, incident_id, persisted_actions)
+
     return persisted_actions
+
+
+def _notify_slack_actions(db: Session, incident_id: int, persisted_actions: list[ProposedAction]) -> None:
+    # Local import to avoid a module-load cycle: app.slack_bot imports
+    # app.tasks, which imports this module (app.agents.runner) - importing
+    # slack_bot at this module's top level would try to load app.tasks
+    # before app.agents.runner itself finished loading. Deferring the
+    # import to call time (long after both modules are fully initialized)
+    # sidesteps it entirely.
+    from app.slack_bot import notify_proposed_actions
+
+    if not persisted_actions:
+        return
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not incident:
+        return
+    try:
+        notify_proposed_actions(db, incident, persisted_actions)
+    except Exception:
+        pass
 
 
 def mark_run_failed(db: Session, run: AgentRun, error: str) -> None:

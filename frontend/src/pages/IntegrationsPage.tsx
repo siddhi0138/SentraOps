@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, slackAuthorizeUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type {
   ConnectorInstance,
@@ -110,6 +110,43 @@ function ConfigForm({
   )
 }
 
+function CriticalChannelEditor({ connector, onSaved }: { connector: ConnectorInstance; onSaved: () => void }) {
+  const [value, setValue] = useState(connector.config.critical_channel ?? '')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    try {
+      await api.updateConnectorConfig(connector.id, { critical_channel: value.trim() })
+      await onSaved()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <span className="text-xs text-muted-foreground shrink-0">Also alert critical incidents to:</span>
+      <input
+        placeholder="critical-incidents"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-40 rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
+      />
+      <button
+        onClick={() => void save()}
+        disabled={saving}
+        className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-xs px-2.5 py-1 text-foreground transition"
+      >
+        {saving ? 'Saving...' : 'Save'}
+      </button>
+      {connector.config.critical_channel && (
+        <span className="text-xs text-muted-foreground">currently: #{connector.config.critical_channel}</span>
+      )}
+    </div>
+  )
+}
+
 function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canOperate: boolean }) {
   const [plugins, setPlugins] = useState<ConnectorPluginType[]>([])
   const [instances, setInstances] = useState<ConnectorInstance[]>([])
@@ -130,6 +167,21 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
   useEffect(() => {
     void load()
   }, [load])
+
+  // Slack's OAuth callback redirects the browser back here with
+  // ?slack=connected|error - a one-time toast, then scrub the param so a
+  // refresh doesn't keep re-showing it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const slackResult = params.get('slack')
+    if (!slackResult) return
+    setMessage(slackResult === 'connected' ? 'Slack connected successfully.' : 'Failed to connect Slack - please try again.')
+    void load()
+    params.delete('slack')
+    const query = params.toString()
+    window.history.replaceState({}, '', window.location.pathname + (query ? `?${query}` : ''))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const selectedPlugin = plugins.find((p) => p.key === pluginKey)
 
@@ -170,8 +222,9 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
     <div className="space-y-4">
       <h2 className="text-sm font-medium text-foreground">Connectors</h2>
       <p className="text-xs text-muted-foreground">
-        Real, keyless log-source integrations that pull data into the platform through the same ingestion pipeline as
-        file uploads.
+        Real integrations: keyless log sources that pull data into the platform through the same ingestion pipeline
+        as file uploads, plus OAuth-installed apps like Slack that post incident alerts and take approve/reject
+        actions from inside the workspace.
       </p>
 
       {message && <p className="text-xs text-muted-foreground bg-card/60 border border-secondary rounded-lg px-3 py-2">{message}</p>}
@@ -193,22 +246,41 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
                 </option>
               ))}
             </select>
-            <input
-              placeholder="Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
-            />
+            {selectedPlugin?.auth_type !== 'oauth' && (
+              <input
+                placeholder="Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
+              />
+            )}
           </div>
-          {selectedPlugin && (
-            <ConfigForm fields={selectedPlugin.config_fields} config={config} onChange={setConfig} />
+          {selectedPlugin?.auth_type === 'oauth' ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Installs SentraOps as a Slack app in your workspace - no config to type in, Slack handles the
+                connection.
+              </p>
+              <a
+                href={slackAuthorizeUrl()}
+                className="inline-block rounded-lg border border-primary hover:bg-primary/40 text-xs px-3 py-1.5 text-primary transition"
+              >
+                Connect to {selectedPlugin.display_name}
+              </a>
+            </>
+          ) : (
+            <>
+              {selectedPlugin && (
+                <ConfigForm fields={selectedPlugin.config_fields} config={config} onChange={setConfig} />
+              )}
+              <button
+                onClick={() => void create()}
+                className="rounded-lg border border-primary hover:bg-primary/40 text-xs px-3 py-1.5 text-primary transition"
+              >
+                Add Connector
+              </button>
+            </>
           )}
-          <button
-            onClick={() => void create()}
-            className="rounded-lg border border-primary hover:bg-primary/40 text-xs px-3 py-1.5 text-primary transition"
-          >
-            Add Connector
-          </button>
         </div>
       )}
 
@@ -245,6 +317,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
                 </div>
               )}
             </div>
+            {canOperate && c.plugin_key === 'slack' && <CriticalChannelEditor connector={c} onSaved={load} />}
           </div>
         ))}
         {instances.length === 0 && <p className="text-sm text-muted-foreground">No connectors configured yet.</p>}

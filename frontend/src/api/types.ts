@@ -118,6 +118,10 @@ export interface ChatResponse {
   question: string
   answer: string
   sources: RagResult[]
+  confidence: 'low' | 'medium' | 'high'
+  semantic_score: number
+  structural_corroboration: number
+  evidence_checked: number
 }
 
 export interface IncidentExplanation {
@@ -350,6 +354,7 @@ export interface ConnectorPluginType {
   display_name: string
   category: string
   config_fields: string[]
+  auth_type: 'config' | 'oauth'
 }
 
 export interface ResponseActionPluginType {

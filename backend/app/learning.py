@@ -29,6 +29,19 @@ def record_feedback(
     db.add(feedback)
     db.commit()
     db.refresh(feedback)
+
+    # Local import: avoids coupling this module's import-time chain to
+    # app.slack_bot's (app.tasks -> app.agents.*) for a feature that's
+    # purely a side effect of this one function - same deferred-import
+    # pattern app/correlation.py and app/agents/runner.py use for their own
+    # Slack hooks.
+    from app.slack_bot import notify_feedback
+
+    try:
+        notify_feedback(db, feedback)
+    except Exception:
+        pass
+
     return feedback
 
 
