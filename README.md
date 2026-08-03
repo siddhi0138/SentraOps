@@ -6,21 +6,21 @@ solid SOC platform first, AI reasoning layered on top of it later.
 ## Roadmap
 
 ```
-Milestone 1: CyberSentinel Core       - Foundation SOC (no AI)
+Milestone 1: CyberSentinel Core       - Foundation SOC (no AI)          [DONE]
 Milestone 2: AI Security Analyst      - LLM reasoning over the platform
 Milestone 3: Autonomous AI Security Team - Multi-agent investigation
 Milestone 4: Enterprise SOC Platform  - Streaming, graph, RBAC, deployment
 ```
 
-## Milestone 1 progress: CyberSentinel Core
+## Milestone 1: CyberSentinel Core — complete
 
-Building this in dependency order, since each layer needs the one before it:
+Built in dependency order, since each layer needed the one before it:
 
 - [x] Step 1 — Ingestion, normalization, persistence
 - [x] Step 2 — Auth + RBAC
 - [x] Step 3 — Correlation engine
-- [x] **Step 4 — React dashboard + investigation page** (this step)
-- [ ] Step 5 — Assets, search, incidents workflow, notifications, reports
+- [x] Step 4 — React dashboard + investigation page
+- [x] **Step 5 — Assets, search, incident workflow, notifications, reports** (this step)
 
 ### What step 1 delivers
 
@@ -92,6 +92,33 @@ Role is enforced server-side regardless of what the UI shows/hides — the
 frontend just reflects it so a viewer doesn't see action buttons that would
 403 anyway.
 
+### What step 5 delivers
+
+The remaining Milestone 1 modules, closing it out as a complete product:
+
+- **Assets** — every host seen in ingested events is auto-upserted into an
+  asset inventory (first/last seen, event count), case-insensitively so the
+  same host logged with different casing across sources still merges into
+  one row. Admin/analyst can enrich it with OS, department, owner, and a
+  criticality rating.
+- **Global search** — `GET /search?q=` fans a query out across events,
+  incidents (by title), and assets in one call; the navbar search box shows
+  grouped, clickable results.
+- **Incident workflow** — incidents now have a `priority` (defaults from
+  risk level, editable) and an `assignee` (any admin/analyst, via a picker
+  backed by `GET /users`), plus a threaded comments log
+  (`POST /incidents/{id}/comments`).
+- **Notifications** — every new incident notifies all admins/analysts;
+  assigning an incident notifies the assignee. In-app only for now (no
+  email/Slack yet — see the roadmap). The navbar bell polls
+  `GET /notifications` every 30s for an unread badge.
+- **Reports/export** — `GET /incidents/{id}/report.md` downloads the
+  existing markdown report; `GET /events/export.csv` and
+  `GET /incidents/export.csv` export the current filtered view. PDF export
+  was deliberately left out of this milestone — it needs a real rendering
+  dependency (WeasyPrint/reportlab) that isn't worth pulling in before
+  there's a design worth exporting to PDF.
+
 ### Supported log sources
 
 | source_type  | Input format                          |
@@ -111,8 +138,16 @@ frontend just reflects it so a viewer doesn't see action buttons that would
 - `GET /events?q=&event_type=&severity=&username=&host=&source_ip=&limit=&offset=` — search/filter persisted events. **Requires any authenticated role.**
 - `POST /correlate` — clusters not-yet-correlated events into incidents. **Requires admin or analyst role.**
 - `GET /incidents?status=&risk_level=&limit=&offset=` — list incidents. **Requires any authenticated role.**
-- `GET /incidents/{id}` — full incident detail: timeline, alerts, threat intel, risk factors, recommended actions, markdown report. **Requires any authenticated role.**
-- `PATCH /incidents/{id}?status=open|closed` — update incident status. **Requires admin or analyst role.**
+- `GET /incidents/{id}` — full incident detail: timeline, alerts, threat intel, risk factors, recommended actions, markdown report, comments. **Requires any authenticated role.**
+- `GET /incidents/{id}/report.md` — download the markdown report. **Requires any authenticated role.**
+- `GET /incidents/export.csv`, `GET /events/export.csv` — CSV export (same filters as the list endpoints). **Requires any authenticated role.**
+- `PATCH /incidents/{id}` — body `{"status"?, "priority"?, "assignee_id"?}` (any subset). Assigning notifies the assignee. **Requires admin or analyst role.**
+- `POST /incidents/{id}/comments` — body `{"body"}`. **Requires admin or analyst role.**
+- `GET /assets?q=&limit=&offset=` — list auto-discovered assets. **Requires any authenticated role.**
+- `PATCH /assets/{id}` — body `{"os"?, "department"?, "owner"?, "criticality"?}`. **Requires admin or analyst role.**
+- `GET /search?q=` — events + incidents + assets matching `q`, ≤10 each. **Requires any authenticated role.**
+- `GET /notifications?unread_only=` — the current user's notifications + unread count.
+- `PATCH /notifications/{id}/read`, `POST /notifications/read-all` — mark read.
 
 ### Auth + RBAC
 
@@ -126,7 +161,7 @@ user's existing access token works immediately without re-authenticating.
 - `POST /auth/login` — body `{"email", "password"}` → `{access_token, refresh_token}`
 - `POST /auth/refresh` — body `{"refresh_token"}` → new token pair
 - `GET /auth/me` — current user (any authenticated role)
-- `GET /users` — list all users. **Admin only.**
+- `GET /users` — list all users (used to populate the incident-assignee picker). **Admin or analyst.**
 - `PATCH /users/{id}/role` — body `{"role": "admin"|"analyst"|"viewer"}`. **Admin only.**
 
 Authenticated requests send `Authorization: Bearer <access_token>`.
@@ -197,10 +232,10 @@ backend/
   app/
     parsers/        # per-source-format normalizers + registry
     db.py           # SQLAlchemy engine/session (Postgres or SQLite)
-    db_models.py    # RawLog, Event, User, Incident tables
+    db_models.py    # RawLog, Event, User, Incident, IncidentComment, Asset, Notification tables
     auth.py         # password hashing, JWT, RBAC dependencies
-    ingestion.py    # parse + persist raw logs
-    correlation.py  # cluster events into incidents, score risk, recommend actions
+    ingestion.py    # parse + persist raw logs, upsert asset inventory
+    correlation.py  # cluster events into incidents, score risk, recommend actions, notify
     simulate.py     # synthetic attack scenarios for demoing without real infra
     main.py         # FastAPI app
   data/
@@ -210,8 +245,8 @@ frontend/
   src/
     api/            # fetch client (JWT storage + refresh-on-401) + TS types
     auth/           # AuthContext (login/register/logout, session restore)
-    components/     # Layout, ProtectedRoute, badges, stat cards
-    pages/          # Login, Register, Dashboard, Events, Incidents(+ detail)
+    components/     # Layout, ProtectedRoute, badges, stat cards, SearchBar, NotificationBell
+    pages/          # Login, Register, Dashboard, Events, Incidents(+ detail), Assets
 docker-compose.yml
 ```
 
