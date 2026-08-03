@@ -260,3 +260,59 @@ html.dark {
 @utility pulse-dot {
   animation: pulse-dot 1.6s ease-in-out infinite;
 }
+
+/* driver.js (AppTour) re-themed to match the app instead of its default
+   white-card look, which would read as a foreign widget dropped on top of
+   the SOC console rather than a real part of the product.
+   !important throughout: driver.css is imported inside AppTour.tsx (a
+   component module), so Vite can emit it after this file in the final
+   bundle - at equal selector specificity, source order would let driver's
+   own color:#2d2d2d/background:#fff win, which is exactly what made the
+   title read as dark-on-dark in dark mode. Forcing precedence here instead
+   of gambling on bundle ordering. */
+.driver-popover {
+  background-color: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 8px 32px -8px color-mix(in oklch, black 50%, transparent) !important;
+}
+.driver-popover-title {
+  color: var(--popover-foreground) !important;
+  font-family: var(--font-sans) !important;
+}
+.driver-popover-description {
+  color: var(--muted-foreground) !important;
+}
+.driver-popover-progress-text {
+  color: var(--muted-foreground) !important;
+}
+.driver-popover-close-btn {
+  color: var(--muted-foreground) !important;
+}
+.driver-popover-close-btn:hover,
+.driver-popover-close-btn:focus {
+  color: var(--popover-foreground) !important;
+}
+.driver-popover-footer-btn {
+  background-color: var(--secondary) !important;
+  color: var(--secondary-foreground) !important;
+  border: 1px solid var(--border) !important;
+}
+.driver-popover-footer-btn:hover,
+.driver-popover-footer-btn:focus {
+  background-color: var(--muted) !important;
+}
+.driver-popover-footer-btn.driver-popover-next-btn {
+  background-color: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-color: var(--primary) !important;
+}
+.driver-popover-arrow-side-left { border-right-color: var(--popover); }
+.driver-popover-arrow-side-right { border-left-color: var(--popover); }
+.driver-popover-arrow-side-top { border-bottom-color: var(--popover); }
+.driver-popover-arrow-side-bottom { border-top-color: var(--popover); }
+.driver-overlay {
+  fill: black;
+  opacity: 0.7;
+}

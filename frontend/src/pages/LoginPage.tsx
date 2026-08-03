@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { AuthLayout } from '../components/AuthLayout'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -26,11 +27,11 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm panel p-8 space-y-4">
+    <AuthLayout>
+      <form onSubmit={handleSubmit} className="panel space-y-4 p-8 shadow-2xl shadow-black/20">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">SentraOps</h1>
-          <p className="text-sm text-muted-foreground">Sign in to the SOC console</p>
+          <h1 className="text-xl font-semibold text-foreground">Welcome back</h1>
+          <p className="text-sm text-muted-foreground">Sign in to your SOC console</p>
         </div>
 
         {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
@@ -59,18 +60,18 @@ export function LoginPage() {
         <button
           disabled={submitting}
           type="submit"
-          className="w-full rounded-lg bg-primary hover:bg-primary disabled:opacity-50 text-white font-medium py-2 transition"
+          className="w-full rounded-lg bg-primary py-2 font-medium text-white transition hover:opacity-90 disabled:opacity-50 glow-primary"
         >
           {submitting ? 'Signing in...' : 'Sign in'}
         </button>
 
-        <p className="text-sm text-muted-foreground text-center">
+        <p className="text-center text-sm text-muted-foreground">
           No account?{' '}
           <Link to="/register" className="text-primary hover:underline">
             Register
           </Link>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   )
 }

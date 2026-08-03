@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { AuthLayout } from '../components/AuthLayout'
 
 type Mode = 'create' | 'join'
 
@@ -35,8 +36,8 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm panel p-8 space-y-4">
+    <AuthLayout>
+      <form onSubmit={handleSubmit} className="panel space-y-4 p-8 shadow-2xl shadow-black/20">
         <div>
           <h1 className="text-xl font-semibold text-foreground">
             {mode === 'create' ? 'Set up your organization' : 'Join an organization'}
@@ -116,18 +117,18 @@ export function RegisterPage() {
         <button
           disabled={submitting}
           type="submit"
-          className="w-full rounded-lg bg-primary hover:bg-primary disabled:opacity-50 text-white font-medium py-2 transition"
+          className="w-full rounded-lg bg-primary py-2 font-medium text-white transition hover:opacity-90 disabled:opacity-50 glow-primary"
         >
           {submitting ? 'Creating account...' : mode === 'create' ? 'Create organization' : 'Join organization'}
         </button>
 
-        <p className="text-sm text-muted-foreground text-center">
+        <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
           <Link to="/login" className="text-primary hover:underline">
             Sign in
           </Link>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   )
 }
