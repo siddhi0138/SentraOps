@@ -1,3 +1,4 @@
+import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,7 +64,77 @@ TECHNIQUES: dict[str, dict] = {
         "severity": "high",
         "command": "sh -c \"echo whoami | base64\"",
     },
+    "T1083": {
+        "name": "File and Directory Discovery",
+        "category": "discovery",
+        "severity": "low",
+        "command": "sh -c \"find / -maxdepth 3 -type d 2>/dev/null | head -20\"",
+    },
+    "T1018": {
+        "name": "Remote System Discovery",
+        "category": "discovery",
+        "severity": "low",
+        "command": "sh -c \"cat /etc/resolv.conf 2>/dev/null; getent hosts 2>/dev/null\"",
+    },
+    "T1518": {
+        "name": "Software Discovery",
+        "category": "discovery",
+        "severity": "low",
+        "command": "sh -c \"apk list --installed 2>/dev/null | head -20; which curl wget nc python3 2>/dev/null\"",
+    },
+    "T1069": {
+        "name": "Permission Groups Discovery",
+        "category": "discovery",
+        "severity": "low",
+        "command": "sh -c 'cat /etc/group | head -10'",
+    },
+    "T1552.001": {
+        "name": "Unsecured Credentials: Credentials In Files",
+        "category": "credential-access",
+        "severity": "high",
+        "command": "sh -c \"find / -iname '*password*' -o -iname '*.pem' -o -iname '*credential*' 2>/dev/null | head -10\"",
+    },
+    "T1005": {
+        "name": "Data from Local System",
+        "category": "collection",
+        "severity": "medium",
+        "command": "sh -c \"find / -maxdepth 4 -newer /etc/hostname -type f 2>/dev/null | head -10\"",
+    },
+    "T1560": {
+        "name": "Archive Collected Data",
+        "category": "collection",
+        "severity": "medium",
+        # Self-contained: only ever archives a file it just created, never
+        # anything real - real archiving behavior, harmless target.
+        "command": "sh -c \"echo demo > /tmp/.sentraops_bas_collected && tar czf /tmp/.sentraops_bas.tar.gz /tmp/.sentraops_bas_collected && ls -la /tmp/.sentraops_bas.tar.gz && rm -f /tmp/.sentraops_bas_collected /tmp/.sentraops_bas.tar.gz\"",
+    },
+    "T1070.004": {
+        "name": "Indicator Removal: File Deletion",
+        "category": "defense-evasion",
+        "severity": "high",
+        # Also self-contained: creates its own throwaway file, then deletes
+        # it - demonstrates the real technique (evidence deletion) without
+        # ever touching a file this run didn't create itself.
+        "command": "sh -c \"touch /tmp/.sentraops_bas_artifact && rm -f /tmp/.sentraops_bas_artifact && echo 'artifact removed'\"",
+    },
 }
+
+_DISCOVERY_TECHNIQUE_IDS = [tid for tid, t in TECHNIQUES.items() if t["category"] == "discovery"]
+_NON_DISCOVERY_TECHNIQUE_IDS = [tid for tid, t in TECHNIQUES.items() if t["category"] != "discovery"]
+
+
+def pick_random_campaign() -> list[str]:
+    """A believable, varying attack chain for the "Simulate attack" button:
+    real attackers recon before anything else, so this always includes a
+    couple of real discovery techniques, plus a random handful from the
+    rest of the catalog (collection/credential-access/defense-evasion/C2).
+    Different techniques (and therefore a different resulting incident)
+    on every call, instead of always running the entire catalog in the
+    same order."""
+    discovery_pick = random.sample(_DISCOVERY_TECHNIQUE_IDS, k=min(2, len(_DISCOVERY_TECHNIQUE_IDS)))
+    other_count = min(random.randint(2, 4), len(_NON_DISCOVERY_TECHNIQUE_IDS))
+    other_pick = random.sample(_NON_DISCOVERY_TECHNIQUE_IDS, k=other_count)
+    return discovery_pick + other_pick
 
 
 def _load_k8s_config() -> None:
