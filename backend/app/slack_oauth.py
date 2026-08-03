@@ -16,10 +16,14 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
 # Minimum viable bot scopes for what app/slack_bot.py + the /slack/commands
 # and /slack/interactions handlers actually do: post messages, read
-# workspace/user identity for auth.test, receive slash commands, and (
-# chat:write.public) post critical-incident alerts into a second,
-# admin-chosen channel without needing the bot to be invited into it first.
-SLACK_BOT_SCOPES = "chat:write,chat:write.public,commands,channels:read,incoming-webhook"
+# workspace/user identity for auth.test, receive slash commands,
+# (chat:write.public) post critical-incident alerts into a second,
+# admin-chosen channel without needing the bot to be invited into it first,
+# (files:write) upload a real incident report file into the default channel
+# from the Download Report button, and (channels:manage) auto-create the
+# critical/soc-team/executive/compliance channels for a brand-new install
+# instead of requiring an admin to create + name each one by hand.
+SLACK_BOT_SCOPES = "chat:write,chat:write.public,commands,channels:read,incoming-webhook,files:write,channels:manage"
 
 _STATE_ALG = "HS256"
 _STATE_TTL_SECONDS = 600  # 10 minutes - long enough to click through Slack's

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../api/client'
+import { usePersistentState } from '../hooks/usePersistentState'
 import { SeverityBadge } from './Badge'
 import type { AgentRunDetail, AgentRunSummary, EventItem } from '../api/types'
 
@@ -27,12 +28,21 @@ interface Props {
 
 export function AttackReplayPanel({ incidentId, timeline }: Props) {
   const [runs, setRuns] = useState<AgentRunSummary[]>([])
-  const [selectedRun, setSelectedRun] = useState<AgentRunDetail | null>(null)
+  // Which run is selected and how far the user has scrubbed both survive a
+  // refresh (keyed per incident) - previously both silently reset (back to
+  // the latest run, step 1) on every reload, discarding exactly where the
+  // user had gotten to.
+  const [selectedRun, setSelectedRun] = usePersistentState<AgentRunDetail>(`attack-replay-run-${incidentId}`)
+  const [persistedIndex, setPersistedIndex] = usePersistentState<number>(`attack-replay-index-${incidentId}`, 0)
+  const index = persistedIndex ?? 0
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function setIndex(update: number | ((prev: number) => number)) {
+    setPersistedIndex((prev) => (typeof update === 'function' ? (update as (p: number) => number)(prev ?? 0) : update))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -42,9 +52,15 @@ export function AttackReplayPanel({ incidentId, timeline }: Props) {
         const { runs: list } = await api.listAgentRuns(incidentId)
         if (cancelled) return
         setRuns(list)
-        const latestCompleted = [...list].reverse().find((r) => r.status === 'completed') ?? list[list.length - 1]
-        if (latestCompleted) {
-          setSelectedRun(await api.getAgentRun(latestCompleted.id))
+        // Only auto-pick the latest run the first time this incident is
+        // viewed in this session - if a run is already persisted (a real
+        // refresh, not a fresh visit), keep showing exactly what the user
+        // had selected instead of silently jumping back to the newest one.
+        if (!selectedRun) {
+          const latestCompleted = [...list].reverse().find((r) => r.status === 'completed') ?? list[list.length - 1]
+          if (latestCompleted) {
+            setSelectedRun(await api.getAgentRun(latestCompleted.id))
+          }
         }
         setError(null)
       } catch (err) {
@@ -57,6 +73,7 @@ export function AttackReplayPanel({ incidentId, timeline }: Props) {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incidentId])
 
   async function selectRun(runId: number) {
@@ -85,7 +102,12 @@ export function AttackReplayPanel({ incidentId, timeline }: Props) {
   }, [timeline, selectedRun])
 
   useEffect(() => {
-    setIndex(0)
+    // Clamp rather than always zeroing - a genuinely shorter step list (a
+    // different, shorter run selected) still resets out-of-range index to
+    // 0, but the initial 0 -> N transition while data loads on a refresh
+    // (restoring a persisted index) must not stomp the position the user
+    // had just scrubbed to.
+    setIndex((i) => (i >= steps.length ? 0 : i))
     setPlaying(false)
   }, [steps.length])
 

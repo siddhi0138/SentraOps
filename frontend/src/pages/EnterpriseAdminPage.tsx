@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { isAdminRole } from '../auth/roles'
 import type { ApiKeyCreated, ApiKeySummary, AuditLogEntryItem, OrganizationSettings } from '../api/types'
 
 function OrgSettingsSection({ org, isAdmin, onChange }: { org: OrganizationSettings; isAdmin: boolean; onChange: () => void }) {
@@ -209,7 +210,7 @@ function AuditLogSection() {
 
 export function EnterpriseAdminPage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = isAdminRole(user?.role)
 
   const [org, setOrg] = useState<OrganizationSettings | null>(null)
   const [loading, setLoading] = useState(true)

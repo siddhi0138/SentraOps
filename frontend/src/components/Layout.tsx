@@ -19,6 +19,7 @@ import {
 import { useEffect, type ComponentType, type CSSProperties } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct } from '../auth/roles'
 import { useTheme } from '../theme/ThemeContext'
 import { hasSeenTour, useAppTour } from './AppTour'
 import { NotificationBell } from './NotificationBell'
@@ -132,7 +133,7 @@ export function Layout() {
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
   const current = activeItem(location.pathname)
-  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const canAct = roleCanAct(user?.role)
   const { startTour } = useAppTour(canAct)
 
   // Layout mounts once per session (React Router keeps it mounted across

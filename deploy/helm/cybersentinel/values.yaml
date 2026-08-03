@@ -62,3 +62,9 @@ secrets:
   slackClientId: ""
   slackClientSecret: ""
   slackSigningSecret: ""
+  # Empty by default - the Threat Intel agent falls back to the platform's
+  # own local indicator table (demo seed + synced feeds) without these, it
+  # never blocks correlation. Free tiers: virustotal.com (4 req/min, 500/day),
+  # abuseipdb.com (1,000 checks/day).
+  virustotalApiKey: ""
+  abuseipdbApiKey: ""

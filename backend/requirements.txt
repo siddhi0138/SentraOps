@@ -32,3 +32,4 @@ scipy==1.16.2
 joblib==1.5.2
 narwhals==2.24.0
 threadpoolctl==3.6.0
+kubernetes==36.0.3

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, Bot, ChevronRight, ListChecks, Server, ShieldAlert, Sparkles, Zap } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct } from '../auth/roles'
 import { SEVERITY_COLORS, SeverityBadge, StatusBadge } from '../components/Badge'
 import { StatCard } from '../components/StatCard'
 import { Sparkline } from '../components/Sparkline'
@@ -41,7 +42,7 @@ function bucketEventVolume(events: EventItem[], buckets = 16): number[] {
 
 export function DashboardPage() {
   const { user } = useAuth()
-  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const canAct = roleCanAct(user?.role)
 
   const [stats, setStats] = useState<Stats | null>(null)
   const [spark, setSpark] = useState<number[]>([])
@@ -85,14 +86,15 @@ export function DashboardPage() {
     setActionError(null)
     setActionMessage(null)
     try {
-      await api.simulate('phishing_ransomware')
+      const sim = await api.simulate('phishing_ransomware')
+      const modeLabel = sim.mode === 'real' ? 'Ran a real attack campaign against a live sandboxed pod' : 'Simulated an attack (synthetic data)'
       const result = await api.correlate()
-      setActionMessage(`Simulated an attack and created ${result.incidents_created} incident(s). Running AI investigation…`)
+      setActionMessage(`${modeLabel} and created ${result.incidents_created} incident(s). Running AI investigation…`)
 
       const topIncident = [...result.incidents].sort((a, b) => b.risk_score - a.risk_score)[0]
       if (topIncident) {
         await api.investigateIncident(topIncident.id)
-        setActionMessage(`Simulated an attack, created ${result.incidents_created} incident(s), and ran a full AI investigation on "${topIncident.title}".`)
+        setActionMessage(`${modeLabel}, created ${result.incidents_created} incident(s), and ran a full AI investigation on "${topIncident.title}".`)
       }
 
       await api.syncGraph().catch(() => {})

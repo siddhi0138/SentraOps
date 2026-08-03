@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db_models import Event, Incident, Notification, User
 from app.rag import store_embedding
-from app.threat_intel_hub import lookup_many
+from app.threat_intel_hub import lookup_many_with_live_fallback
 
 ALERT_SEVERITIES = {"medium", "high", "critical"}
 SEVERITY_WEIGHTS = {"low": 5, "medium": 15, "high": 25, "critical": 35}
@@ -95,13 +95,17 @@ def _lookup_threat_intel(db: Session, timeline: list[Event]) -> list[dict]:
     Intel Hub (app/threat_intel_hub.py) - a real, queryable, cross-tenant
     indicator table (seeded with one curated demo indicator, extendable
     with real feeds like URLhaus), replacing what used to be a single
-    hardcoded IP in this file."""
+    hardcoded IP in this file. Also tries a real live VirusTotal/AbuseIPDB
+    lookup for anything not already known locally, if those API keys are
+    configured (see lookup_many_with_live_fallback) - a no-op fallback to
+    local-only matching when they aren't, so this behaves identically to
+    before for anyone who hasn't set those keys."""
     candidates: list[str | None] = []
     for event in timeline:
         candidates.append(event.source_ip)
         candidates.append(event.host)
 
-    hits = lookup_many(db, candidates)
+    hits = lookup_many_with_live_fallback(db, candidates)
     seen: set[str] = set()
     matches = []
     for value, indicator in hits.items():
@@ -304,15 +308,19 @@ def run_correlation(db: Session, organization_id: int) -> list[Incident]:
     return incidents
 
 
+_RESPONDER_ROLES = ("owner", "admin", "soc_manager", "analyst")
+
+
 def _notify_responders(db: Session, organization_id: int, incident: Incident) -> None:
-    """New incidents page every admin/analyst *in the same organization* -
-    there's no assignee yet for a freshly-correlated incident, so everyone
-    who could triage it gets notified. Must stay org-scoped: paging another
-    tenant's staff would both leak this incident's existence/title to them
-    and spam them with an alert they have no way to act on."""
+    """New incidents page everyone with operational (non-read-only) access
+    *in the same organization* - there's no assignee yet for a freshly-
+    correlated incident, so everyone who could triage it gets notified.
+    Must stay org-scoped: paging another tenant's staff would both leak
+    this incident's existence/title to them and spam them with an alert
+    they have no way to act on."""
     responders = (
         db.query(User)
-        .filter(User.organization_id == organization_id, User.role.in_(("admin", "analyst")), User.is_active.is_(True))
+        .filter(User.organization_id == organization_id, User.role.in_(_RESPONDER_ROLES), User.is_active.is_(True))
         .all()
     )
     for user in responders:

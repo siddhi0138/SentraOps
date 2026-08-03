@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { isAdminRole } from '../auth/roles'
 import type { Playbook } from '../api/types'
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -11,7 +12,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export function AIMarketplacePage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = isAdminRole(user?.role)
 
   const [playbooks, setPlaybooks] = useState<Playbook[]>([])
   const [loading, setLoading] = useState(true)

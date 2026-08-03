@@ -116,6 +116,23 @@ def test_webhook_action_reports_http_failure():
     assert "unreachable" in message
 
 
+def test_webhook_action_includes_slack_blocks_and_incident_link_when_provided():
+    action = {
+        "category": "containment", "incident_id": 7, "description": "Disable account x",
+        "incident_title": "Suspicious login for jdoe", "risk_level": "high", "priority": "high",
+        "affected_hosts": ["HOST-A"], "affected_users": ["jdoe"],
+        "incident_url": "http://localhost:5173/incidents/7",
+    }
+    with patch("app.plugins.actions.webhook.httpx.post", return_value=_response("https://example.com/hook", 200)) as mock_post:
+        WebhookAction().execute({"webhook_url": "https://example.com/hook"}, action)
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert "blocks" in payload
+    assert "<http://localhost:5173/incidents/7|" in payload["blocks"][0]["text"]["text"]
+    assert "Suspicious login for jdoe" in payload["text"]
+    assert "HOST-A" in payload["content"]
+
+
 GENERIC_REST_CONFIG = {
     "base_url": "https://vendor.example.com/api/events",
     "auth_header_name": "X-Api-Key",
@@ -242,9 +259,24 @@ def test_generic_rest_test_connection_reports_http_error_status():
     assert "401" in message
 
 
-def test_generic_rest_test_connection_requires_base_url():
+def test_generic_rest_test_connection_simulates_ok_without_base_url():
+    # Deliberately not a real connectivity check - lets someone try the
+    # connector UI before they have a real endpoint, but clearly labeled
+    # "Simulated" rather than indistinguishable from a real success.
     ok, message = GenericRestConnector().test_connection({})
-    assert ok is False
+    assert ok is True
+    assert "Simulated" in message
+
+
+def test_generic_rest_pull_never_fabricates_events_without_base_url():
+    # Unlike test_connection, pull() results flow straight into real
+    # ingestion (see /connectors/{id}/sync) - faking events here would
+    # create real-looking incidents from nothing, so this must still fail.
+    try:
+        GenericRestConnector().pull({})
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "base_url" in str(exc)
 
 
 JIRA_CONFIG = {
@@ -284,6 +316,90 @@ def test_jira_action_reports_http_failure():
     assert "unreachable" in message
 
 
+def test_jira_action_includes_incident_context_when_provided():
+    action = {
+        "category": "containment", "incident_id": 7, "description": "Isolate FINANCE-PC-21",
+        "incident_title": "Suspected ransomware on FINANCE-PC-21", "risk_level": "critical", "priority": "high",
+        "affected_hosts": ["FINANCE-PC-21"], "affected_users": ["jdoe"],
+        "incident_url": "http://localhost:5173/incidents/7",
+    }
+    with patch(
+        "app.plugins.actions.jira.httpx.post",
+        return_value=_response(f"{JIRA_CONFIG['base_url']}/rest/api/3/issue", 201, json_body={"key": "SEC-142"}),
+    ) as mock_post:
+        JiraAction().execute(JIRA_CONFIG, action)
+
+    call_kwargs = mock_post.call_args.kwargs
+    assert "Suspected ransomware" in call_kwargs["json"]["fields"]["summary"]
+    description_text = " ".join(
+        block["content"][0]["text"] for block in call_kwargs["json"]["fields"]["description"]["content"]
+    )
+    assert "critical" in description_text
+    assert "FINANCE-PC-21" in description_text
+    assert "jdoe" in description_text
+    assert "localhost:5173/incidents/7" in description_text
+
+
+def test_jira_action_assigns_ticket_when_assignee_email_matches_a_jira_user():
+    action = {"category": "containment", "incident_id": 7, "description": "x", "assignee_email": "jdoe@acme.com"}
+    with patch("app.plugins.actions.jira.httpx.get", return_value=_response(
+        f"{JIRA_CONFIG['base_url']}/rest/api/3/user/search", 200, json_body=[{"accountId": "abc123"}]
+    )):
+        with patch(
+            "app.plugins.actions.jira.httpx.post",
+            return_value=_response(f"{JIRA_CONFIG['base_url']}/rest/api/3/issue", 201, json_body={"key": "SEC-142"}),
+        ) as mock_post:
+            ok, message = JiraAction().execute(JIRA_CONFIG, action)
+
+    assert ok is True
+    assert "assigned to jdoe@acme.com" in message
+    assert mock_post.call_args.kwargs["json"]["fields"]["assignee"] == {"accountId": "abc123"}
+
+
+def test_jira_action_creates_unassigned_ticket_when_no_jira_user_matches_email():
+    action = {"category": "containment", "incident_id": 7, "description": "x", "assignee_email": "nobody@acme.com"}
+    with patch("app.plugins.actions.jira.httpx.get", return_value=_response(
+        f"{JIRA_CONFIG['base_url']}/rest/api/3/user/search", 200, json_body=[]
+    )):
+        with patch(
+            "app.plugins.actions.jira.httpx.post",
+            return_value=_response(f"{JIRA_CONFIG['base_url']}/rest/api/3/issue", 201, json_body={"key": "SEC-142"}),
+        ) as mock_post:
+            ok, message = JiraAction().execute(JIRA_CONFIG, action)
+
+    assert ok is True
+    assert "unassigned" in message
+    assert "nobody@acme.com" in message
+    assert "assignee" not in mock_post.call_args.kwargs["json"]["fields"]
+
+
+def test_jira_action_creates_unassigned_ticket_when_incident_has_no_assignee():
+    action = {"category": "containment", "incident_id": 7, "description": "x"}
+    with patch(
+        "app.plugins.actions.jira.httpx.post",
+        return_value=_response(f"{JIRA_CONFIG['base_url']}/rest/api/3/issue", 201, json_body={"key": "SEC-142"}),
+    ) as mock_post:
+        ok, message = JiraAction().execute(JIRA_CONFIG, action)
+
+    assert ok is True
+    assert "unassigned" not in message  # no assignee_email at all - not worth mentioning
+    assert "assignee" not in mock_post.call_args.kwargs["json"]["fields"]
+
+
+def test_jira_action_lookup_failure_still_creates_unassigned_ticket():
+    action = {"category": "containment", "incident_id": 7, "description": "x", "assignee_email": "jdoe@acme.com"}
+    with patch("app.plugins.actions.jira.httpx.get", side_effect=httpx.ConnectError("unreachable")):
+        with patch(
+            "app.plugins.actions.jira.httpx.post",
+            return_value=_response(f"{JIRA_CONFIG['base_url']}/rest/api/3/issue", 201, json_body={"key": "SEC-142"}),
+        ) as mock_post:
+            ok, message = JiraAction().execute(JIRA_CONFIG, action)
+
+    assert ok is True  # a lookup failure never blocks ticket creation itself
+    assert "unassigned" in message
+    assert "assignee" not in mock_post.call_args.kwargs["json"]["fields"]
+
+
 SERVICENOW_CONFIG = {
     "instance_url": "https://acmedev.service-now.com",
     "username": "admin",
@@ -320,3 +436,24 @@ def test_servicenow_action_reports_http_failure():
         ok, message = ServiceNowAction().execute(SERVICENOW_CONFIG, action)
     assert ok is False
     assert "unreachable" in message
+
+
+def test_servicenow_action_includes_incident_context_when_provided():
+    action = {
+        "category": "eradication", "incident_id": 9, "description": "Reset compromised credentials",
+        "incident_title": "Account takeover for jdoe", "risk_level": "high", "priority": "high",
+        "affected_hosts": [], "affected_users": ["jdoe"],
+        "incident_url": "http://localhost:5173/incidents/9",
+    }
+    with patch(
+        "app.plugins.actions.servicenow.httpx.post",
+        return_value=_response(
+            f"{SERVICENOW_CONFIG['instance_url']}/api/now/table/incident", 201, json_body={"result": {"number": "INC0012345"}}
+        ),
+    ) as mock_post:
+        ServiceNowAction().execute(SERVICENOW_CONFIG, action)
+
+    call_kwargs = mock_post.call_args.kwargs
+    assert "Account takeover" in call_kwargs["json"]["short_description"]
+    assert "jdoe" in call_kwargs["json"]["description"]
+    assert "localhost:5173/incidents/9" in call_kwargs["json"]["description"]

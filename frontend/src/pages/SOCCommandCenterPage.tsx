@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct } from '../auth/roles'
 import { SeverityBadge } from '../components/Badge'
 import { StatCard } from '../components/StatCard'
 import type { AgentRunListItem, CommandCenterQueue, ShiftNote } from '../api/types'
 
 export function SOCCommandCenterPage() {
   const { user } = useAuth()
-  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const canAct = roleCanAct(user?.role)
 
   const [queue, setQueue] = useState<CommandCenterQueue | null>(null)
   const [runningRuns, setRunningRuns] = useState<AgentRunListItem[]>([])

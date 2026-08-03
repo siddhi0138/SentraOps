@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct } from '../auth/roles'
 import { AttackGraphView } from '../components/AttackGraphView'
 import type { GraphData, GraphNode } from '../api/types'
 
@@ -10,7 +11,7 @@ type EntityType = 'host' | 'user' | 'ip'
 export function AttackGraphPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const canAct = roleCanAct(user?.role)
 
   const [graph, setGraph] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)

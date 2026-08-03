@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct } from '../auth/roles'
 import { SeverityBadge } from '../components/Badge'
 import type { Asset, Severity } from '../api/types'
 
@@ -97,7 +98,7 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
 
 export function AssetsPage() {
   const { user } = useAuth()
-  const canEdit = user?.role === 'admin' || user?.role === 'analyst'
+  const canEdit = canAct(user?.role)
 
   const [searchParams] = useSearchParams()
   const [q, setQ] = useState(() => searchParams.get('q') ?? '')

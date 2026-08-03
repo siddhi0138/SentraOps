@@ -23,9 +23,27 @@ class ServiceNowAction(ResponseActionPlugin):
         if not all([instance_url, username, password]):
             return False, "config.instance_url, username, and password are all required"
 
+        incident_title = action.get("incident_title")
+        short_description = (
+            f"[SentraOps] {action['category'].title()} - {incident_title}"
+            if incident_title
+            else f"[SentraOps] {action['category'].title()} action for incident #{action['incident_id']}"
+        )
+        description_lines = [action["description"], ""]
+        if incident_title:
+            description_lines.append(f"Incident: #{action['incident_id']} - {incident_title}")
+        if action.get("risk_level"):
+            description_lines.append(f"Risk level: {action['risk_level']} (priority: {action.get('priority', 'unknown')})")
+        if action.get("affected_hosts"):
+            description_lines.append(f"Affected hosts: {', '.join(action['affected_hosts'])}")
+        if action.get("affected_users"):
+            description_lines.append(f"Affected users: {', '.join(action['affected_users'])}")
+        if action.get("incident_url"):
+            description_lines.append(f"Details: {action['incident_url']}")
+
         payload = {
-            "short_description": f"[SentraOps] {action['category'].title()} action for incident #{action['incident_id']}",
-            "description": action["description"],
+            "short_description": short_description[:160],
+            "description": "\n".join(description_lines).strip(),
             "urgency": _URGENCY_BY_CATEGORY.get(action["category"], "2"),
         }
         try:

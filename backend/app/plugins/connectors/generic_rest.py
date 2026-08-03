@@ -81,7 +81,13 @@ class GenericRestConnector(ConnectorPlugin):
     def test_connection(self, config: dict) -> tuple[bool, str]:
         base_url = config.get("base_url")
         if not base_url:
-            return False, "base_url is required"
+            # Deliberately labeled, not a fabricated success indistinguishable
+            # from a real one: lets someone exploring the connector UI see
+            # what "Test Connection" looks like without needing a real API to
+            # point at yet. Unlike this, pull()/sync below never fakes data -
+            # a simulated *connectivity check* has no downstream effect, but
+            # fake *events* would silently create real-looking incidents.
+            return True, "Simulated OK (no base_url configured yet) - set base_url to run a real connectivity check"
         try:
             response = httpx.get(base_url, headers=self._headers(config), timeout=10)
         except httpx.HTTPError as exc:

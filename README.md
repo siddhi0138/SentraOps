@@ -31,7 +31,9 @@ Every feature below is backed by a real running system, not a mock:
 
 **🤖 AI Security Team**
 - 6 specialized agents (Detection → Investigation → Threat Intel → Risk → Response → Report) collaborating on one incident
+- Real VirusTotal + AbuseIPDB threat-intel lookups when their free-tier API keys are configured, falling back to the platform's own local indicator table (demo seed + synced feeds like URLhaus) when they aren't — same agent logic either way, only the data source changes
 - Natural-language chat and search, grounded in your real events via RAG
+- Knowledge Base — upload your own playbooks/runbooks/policy docs; chat retrieval searches them alongside events and incidents automatically, with a one-click sample set to try it immediately on a fresh org
 - Dual-evidence confidence scoring on every chat answer — cross-checks the RAG retrieval's own semantic-similarity score against whether the same entities are actually connected in the real Neo4j attack graph, instead of trusting either signal alone
 - Institutional memory: repeat hosts/users and similar past incidents feed into agent reasoning, not just the current incident in isolation
 - Live streaming investigation status over WebSockets
@@ -41,6 +43,8 @@ Every feature below is backed by a real running system, not a mock:
 - Neo4j-backed attack graph — see how hosts/users/IPs connect across *every* incident, not just one at a time
 - Digital Twin — "what happens if this is compromised?" blast-radius simulation with an AI-narrated lateral-movement story
 - Attack Replay — step through a real incident's timeline chronologically, then through the AI's own investigation stages
+- Breach & Attack Simulation (BAS) — executes real MITRE ATT&CK techniques (discovery, defense-evasion, C2) inside a real, disposable Kubernetes pod your own deployment controls, not canned data; real command output flows through the same ingestion/correlation/AI-investigation pipeline as any other source
+- **Simulate attack + correlate** (Dashboard) is real-with-fallback: tries a real BAS campaign first when your deployment has cluster access, and only falls back to a canned synthetic scenario when it doesn't — the response always says honestly which one ran, never presents synthetic data as real
 
 **💬 Slack Integration**
 - Real OAuth "Connect to Slack" install — one registered app, independently installable into any organization's own workspace, multi-tenant by design
@@ -51,12 +55,13 @@ Every feature below is backed by a real running system, not a mock:
 
 **🏢 Enterprise**
 - Multi-tenant organizations with real data isolation, verified with dedicated cross-tenant tests
-- Pluggable connector framework (real free-tier feeds: URLhaus, GitHub Security Advisories) and response actions — outbound webhooks (Slack/Discord/generic), plus real Jira and ServiceNow ticket creation for an approved response action
+- Pluggable connector framework (real free-tier feeds: URLhaus, GitHub Security Advisories, plus a config-driven Generic REST connector for any vendor's own API) and response actions — outbound webhooks (Slack/Discord/generic), plus real Jira and ServiceNow ticket creation for an approved response action, with Jira tickets auto-assigned to the incident's SentraOps assignee when their email matches a real Jira user
 - Compliance mapping (NIST / MITRE / CIS / PCI-DSS) against your real ingested data
 - Executive dashboard with AI-generated briefings
 - Predictive anomaly detection over real host/user behavior
 - SOC Command Center — a unified live queue of incidents and pending approvals
-- Playbook marketplace, RBAC, API keys, audit log
+- Playbook marketplace, API keys, audit log
+- RBAC with six real SOC roles - Owner and Admin (full org/integration config; only an Owner can grant/revoke Owner itself), SOC Manager and Analyst (investigate, chat, approve actions), Executive and Auditor (read-only everywhere)
 - Guided in-app product tour for first-time users
 
 **📊 Observability**
@@ -98,7 +103,7 @@ docker compose up --build
 
 First launch downloads the local embedding model, so the first AI-touching request may take a couple of minutes — everything after that is fast.
 
-On first open, register a new organization from the login screen, then click **Simulate attack + correlate** on the Dashboard. That one click ingests a real synthetic attack scenario through the real correlation engine, runs a full AI investigation on the resulting incident, and syncs the attack graph — so the whole platform is populated with real (if synthetic) data end to end, on any account, not just a pre-seeded demo one.
+On first open, register a new organization from the login screen, then click **Simulate attack + correlate** on the Dashboard. That one click ingests an attack scenario through the real correlation engine, runs a full AI investigation on the resulting incident, and syncs the attack graph — so the whole platform is populated with real data end to end, on any account, not just a pre-seeded demo one. Under `docker compose` this uses a canned synthetic scenario (no Kubernetes API available); deployed to a real cluster (see `deploy/helm/`), the same button runs a real BAS campaign instead — see Breach & Attack Simulation above.
 
 ### Key environment variables
 
@@ -109,6 +114,7 @@ On first open, register a new organization from the login screen, then click **S
 | `DATABASE_URL` | No | Defaults to the Postgres container in `docker-compose.yml` |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET` | For Slack integration | From your own Slack app at api.slack.com/apps. The rest of the app works without it — "Connect to Slack" just won't appear functional until set. |
 | `FRONTEND_URL` | For Slack integration | Where Slack redirects/links back to after an OAuth install (e.g. `http://localhost:5173`) |
+| `VIRUSTOTAL_API_KEY` / `ABUSEIPDB_API_KEY` | No | Free tiers at virustotal.com / abuseipdb.com. Without them, the Threat Intel agent uses the platform's own local indicator table instead of live lookups. |
 
 ---
 

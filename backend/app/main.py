@@ -49,6 +49,7 @@ from app.db_models import (
     Event,
     Incident,
     IncidentComment,
+    KnowledgeDocument,
     Notification,
     Organization,
     PlaybookTemplate,
@@ -64,7 +65,17 @@ from app.agents.memory import build_memory_context
 from app.ai import ChatConfigError, ChatProviderError, answer_question, explain_event, explain_incident, translate_query
 from app.confidence import compute_dual_evidence_confidence
 from app.graph import get_entity_blast_radius, get_full_graph, get_incident_subgraph, resync_graph
-from app.slack_bot import handle_investigate_button, handle_review_action_button, handle_slash_command
+from app.slack_bot import (
+    handle_investigate_button,
+    handle_review_action_button,
+    handle_slash_command,
+    notify_assignment,
+    notify_comment,
+    notify_compliance_report,
+    notify_status_change,
+    provision_default_channels,
+    send_report_to_slack,
+)
 from app.slack_oauth import (
     FRONTEND_URL,
     build_authorize_url,
@@ -74,11 +85,15 @@ from app.slack_oauth import (
     verify_slack_signature,
 )
 from app.ingestion import ingest
+from app.knowledge_base import delete_document as delete_knowledge_document
+from app.knowledge_base import ingest_document as ingest_knowledge_document
+from app.knowledge_base import seed_sample_documents
 from app.plugins import registry as plugin_registry
 from app.progress import REDIS_URL, channel_name
 from app.rag import search as rag_search
 from app.rate_limit import limiter
 from app.simulate import get_scenario
+from app import bas
 from app.admin import generate_api_key, record_audit
 from app.command_center import get_queue as get_command_center_queue
 from app.compliance import evaluate_controls, generate_report as generate_compliance_report
@@ -199,7 +214,7 @@ def create_organization(request: Request, payload: OrganizationCreate, db: Sessi
         organization_id=org.id,
         email=payload.email,
         hashed_password=hash_password(payload.password),
-        role=Role.admin.value,
+        role=Role.owner.value,
     )
     db.add(user)
     db.commit()
@@ -217,14 +232,15 @@ def register(request: Request, payload: UserCreate, db: Session = Depends(get_db
     if not org:
         raise HTTPException(status_code=404, detail="Unknown organization - check the invite code")
 
-    # New teammates default to viewer; an existing admin raises their role
-    # via PATCH /users/{id}/role. (The org's very first user, created via
-    # POST /organizations instead of here, is the one who starts as admin.)
+    # New teammates default to the read-only Auditor role; an existing
+    # owner/admin raises their role via PATCH /users/{id}/role. (The org's
+    # very first user, created via POST /organizations instead of here, is
+    # the one who starts as Owner.)
     user = User(
         organization_id=org.id,
         email=payload.email,
         hashed_password=hash_password(payload.password),
-        role=Role.viewer.value,
+        role=Role.auditor.value,
     )
     db.add(user)
     db.commit()
@@ -260,7 +276,7 @@ def me(user: User = Depends(get_current_user)) -> UserOut:
 @app.get("/users", response_model=list[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> list[UserOut]:
     # analysts need this to populate the incident-assignee picker; only role
     # changes stay admin-only (see update_user_role below). Scoped to the
@@ -275,7 +291,7 @@ def update_user_role(
     user_id: int,
     payload: RoleUpdate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(Role.admin)),
+    admin: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> UserOut:
     # organization_id filter here isn't just data hygiene - without it an
     # admin in one org could promote/demote a user in a *different* org by
@@ -283,6 +299,12 @@ def update_user_role(
     user = db.query(User).filter(User.id == user_id, User.organization_id == admin.organization_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Only an Owner can grant or revoke Owner itself - otherwise any Admin
+    # could silently promote themselves (or anyone else) to the org's top
+    # role, which Admin alone should never be able to do.
+    if (payload.role == Role.owner or user.role == Role.owner.value) and admin.role != Role.owner.value:
+        raise HTTPException(status_code=403, detail="Only an Owner can grant or revoke the Owner role")
 
     old_role = user.role
     user.role = payload.role.value
@@ -302,7 +324,7 @@ class OrganizationUpdate(BaseModel):
 @app.get("/organizations/current")
 def get_current_organization(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     org = db.get(Organization, user.organization_id)
     return {"id": org.id, "name": org.name, "slug": org.slug, "plan": org.plan, "created_at": org.created_at.isoformat()}
@@ -312,7 +334,7 @@ def get_current_organization(
 def rename_current_organization(
     payload: OrganizationUpdate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(Role.admin)),
+    admin: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     org = db.get(Organization, admin.organization_id)
     old_name = org.name
@@ -326,7 +348,7 @@ def rename_current_organization(
 @app.post("/organizations/current/rotate-invite-code")
 def rotate_current_invite_code(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(Role.admin)),
+    admin: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     org = db.get(Organization, admin.organization_id)
     old_slug = org.slug
@@ -346,7 +368,7 @@ class ApiKeyCreate(BaseModel):
 def create_api_key(
     payload: ApiKeyCreate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(Role.admin)),
+    admin: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     acting_user_id = payload.user_id if payload.user_id is not None else admin.id
     acting_user = _get_scoped_or_404(db, User, acting_user_id, admin.organization_id, "User not found")
@@ -372,7 +394,7 @@ def create_api_key(
 @app.get("/api-keys")
 def list_api_keys(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(Role.admin)),
+    admin: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     keys = db.query(ApiKey).filter(ApiKey.organization_id == admin.organization_id).order_by(ApiKey.created_at.desc()).all()
     return {"api_keys": [k.to_dict() for k in keys]}
@@ -382,7 +404,7 @@ def list_api_keys(
 def revoke_api_key(
     key_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(Role.admin)),
+    admin: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     api_key = _get_scoped_or_404(db, ApiKey, key_id, admin.organization_id, "API key not found")
     if api_key.revoked_at is None:
@@ -397,7 +419,7 @@ def revoke_api_key(
 def list_audit_log(
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(Role.admin)),
+    admin: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     entries = (
         db.query(AuditLogEntry)
@@ -414,7 +436,7 @@ async def ingest_upload(
     source_type: str = Query(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     # Must be registered before /ingest/{source_type} below - otherwise that
     # route's path-shape matches "/ingest/upload" first (source_type="upload")
@@ -442,12 +464,75 @@ async def ingest_upload(
     return {"ingested": len(events), "skipped": skipped}
 
 
+@app.get("/knowledge-base")
+def list_knowledge_documents(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
+) -> dict:
+    documents = (
+        db.query(KnowledgeDocument)
+        .filter(KnowledgeDocument.organization_id == user.organization_id)
+        .order_by(KnowledgeDocument.created_at.desc())
+        .all()
+    )
+    return {"documents": [d.to_dict() for d in documents]}
+
+
+@app.post("/knowledge-base/upload")
+async def upload_knowledge_document(
+    title: str | None = Query(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
+) -> dict:
+    """Accepts plain text/Markdown only for now - no PDF parsing dependency
+    yet. Chunked, embedded with the same local model as events/incidents,
+    and picked up automatically by /chat and /search since those already
+    query across all content_types unless one is explicitly requested."""
+    raw_bytes = await file.read()
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded plain text or Markdown")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    document = ingest_knowledge_document(
+        db, user.organization_id,
+        title=title or file.filename or "Untitled document",
+        text=text, filename=file.filename, source="upload", uploaded_by_user_id=user.id,
+    )
+    return document.to_dict()
+
+
+@app.post("/knowledge-base/seed-samples")
+def seed_knowledge_base_samples(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
+) -> dict:
+    created = seed_sample_documents(db, user.organization_id)
+    return {"created": [d.to_dict() for d in created]}
+
+
+@app.delete("/knowledge-base/{document_id}")
+def delete_knowledge_base_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
+) -> dict:
+    deleted = delete_knowledge_document(db, user.organization_id, document_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"deleted": True}
+
+
 @app.post("/ingest/{source_type}")
 def ingest_logs(
     source_type: str,
     payload: IngestRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     try:
         events, skipped = ingest(db, user.organization_id, source_type, payload.logs)
@@ -461,7 +546,7 @@ def ingest_logs(
 def ingest_logs_streaming(
     source_type: str,
     payload: IngestRequest,
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Queues raw logs onto this org's Redis Stream and returns
     immediately, instead of parsing/persisting them inline on this request
@@ -478,7 +563,7 @@ def ingest_logs_streaming(
 
 
 @app.get("/streaming/status")
-def get_streaming_status(user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer))) -> dict:
+def get_streaming_status(user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive))) -> dict:
     return stream_status(user.organization_id)
 
 
@@ -486,19 +571,87 @@ def get_streaming_status(user: User = Depends(require_roles(Role.admin, Role.ana
 def simulate(
     scenario: str,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
+    """Real-with-fallback, the same provider pattern as VirusTotal/AbuseIPDB
+    (app/threat_intel_providers.py): tries a real BAS campaign (app/bas.py)
+    against a real Kubernetes pod first, and only falls back to the canned
+    synthetic scenario when no cluster is available or the live run fails
+    for any reason - never silently presents synthetic data as real, the
+    response's "mode" field always says honestly which one happened."""
     try:
         logs_by_source = get_scenario(scenario)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        bas_events = bas.run_campaign(user.organization_id, list(bas.TECHNIQUES))
+        events, skipped = ingest(db, user.organization_id, "bas", bas_events)
+        return {"scenario": scenario, "mode": "real", "sources": {"bas": {"ingested": len(events), "skipped": skipped}}}
+    except Exception:
+        pass  # no cluster access, or a live run failed - fall back below
 
     results = {}
     for source_type, raw_items in logs_by_source.items():
         events, skipped = ingest(db, user.organization_id, source_type, raw_items)
         results[source_type] = {"ingested": len(events), "skipped": skipped}
 
-    return {"scenario": scenario, "sources": results}
+    return {"scenario": scenario, "mode": "synthetic", "sources": results}
+
+
+@app.get("/bas/techniques")
+def list_bas_techniques(user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst))) -> dict:
+    return {
+        "techniques": [
+            {"id": tid, "name": t["name"], "category": t["category"], "severity": t["severity"]}
+            for tid, t in bas.TECHNIQUES.items()
+        ]
+    }
+
+
+class BasRunRequest(BaseModel):
+    technique_ids: list[str] = Field(default_factory=lambda: list(bas.TECHNIQUES))
+
+
+@app.post("/bas/run")
+def run_bas_campaign(
+    payload: BasRunRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
+) -> dict:
+    """Executes real MITRE ATT&CK techniques (app/bas.py) inside a real,
+    sandboxed Kubernetes pod - genuine attacker behavior against a real
+    (if disposable) target, not synthetic canned data like /simulate. The
+    resulting real command output is ingested through the same pipeline
+    as every other log source, so it flows into real correlation/AI
+    investigation like anything else."""
+    unknown = [tid for tid in payload.technique_ids if tid not in bas.TECHNIQUES]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown technique id(s): {unknown}")
+
+    try:
+        raw_items = bas.run_campaign(user.organization_id, payload.technique_ids)
+    except bas.BasNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        # A real cluster is a real system boundary (pod scheduling failure,
+        # image pull error, RBAC misconfiguration, ...) - surface it as a
+        # diagnosable 502, not a bare unhandled 500 an analyst can't act on.
+        raise HTTPException(status_code=502, detail=f"BAS run failed: {exc}")
+
+    events, skipped = ingest(db, user.organization_id, "bas", raw_items)
+    return {"ran": len(payload.technique_ids), "ingested": len(events), "skipped": skipped}
+
+
+@app.delete("/bas/target")
+def teardown_bas_target(
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
+) -> dict:
+    try:
+        deleted = bas.teardown_target_pod(user.organization_id)
+    except bas.BasNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"deleted": deleted}
 
 
 def _csv_row(row: dict) -> dict:
@@ -557,7 +710,7 @@ def list_events(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     query = _filter_events(db, user.organization_id, q, event_type, severity, username, host, source_ip)
     total = query.count()
@@ -575,7 +728,7 @@ def export_events_csv(
     host: str | None = None,
     source_ip: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> Response:
     events = (
         _filter_events(db, user.organization_id, q, event_type, severity, username, host, source_ip)
@@ -603,7 +756,7 @@ def explain_event_endpoint(
     request: Request,
     event_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """AI-generated plain-language explanation of a single raw event - one
     Groq call, not persisted (regenerated on request)."""
@@ -632,7 +785,7 @@ def explain_event_endpoint(
 @app.post("/correlate")
 def correlate(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     incidents = run_correlation(db, user.organization_id)
     return {"incidents_created": len(incidents), "incidents": [i.to_summary_dict() for i in incidents]}
@@ -645,7 +798,7 @@ def list_incidents(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     query = db.query(Incident).filter(Incident.organization_id == user.organization_id)
     if status:
@@ -664,7 +817,7 @@ def export_incidents_csv(
     status: str | None = None,
     risk_level: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> Response:
     query = db.query(Incident).filter(Incident.organization_id == user.organization_id)
     if status:
@@ -691,7 +844,7 @@ def export_incidents_csv(
 def get_incident(
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
     return incident.to_detail_dict()
@@ -701,7 +854,7 @@ def get_incident(
 def download_incident_report(
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> Response:
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
 
@@ -712,6 +865,23 @@ def download_incident_report(
     )
 
 
+@app.post("/incidents/{incident_id}/report/send-to-slack")
+def send_incident_report_to_slack(
+    incident_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
+) -> dict:
+    """The "also send to Slack" half of the Download Report button - a real
+    file upload (see app/slack_bot.py.send_report_to_slack), not a link or
+    a truncated text dump. A missing/unconfigured Slack connector is a
+    normal, expected outcome here (most orgs won't have one), not an error
+    worth a non-200 status - the frontend just shows whatever message comes
+    back."""
+    incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
+    ok, message = send_report_to_slack(db, incident)
+    return {"ok": ok, "message": message}
+
+
 @app.get("/incidents/{incident_id}/explain")
 @limiter.limit("20/minute")
 def explain_incident_endpoint(
@@ -719,7 +889,7 @@ def explain_incident_endpoint(
     incident_id: int,
     audience: Literal["analyst", "executive"] = "analyst",
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """AI-generated explanation, timeline narrative, and structured summary
     for one incident - one Groq call, not persisted (regenerated on
@@ -741,7 +911,7 @@ def similar_incidents(
     incident_id: int,
     k: int = 5,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Reuses the incident's own report as a semantic search query against
     every other incident's already-stored embedding - no Groq call, just
@@ -765,7 +935,7 @@ def similar_incidents(
 def incident_memory(
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """The same cross-incident institutional memory the AI Security Team
     reads from before investigating - similar past incidents and repeat
@@ -788,7 +958,7 @@ def create_incident_feedback(
     incident_id: int,
     payload: FeedbackCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """The Learning Loop's input: a human judgment on how accurate this
     incident's AI investigation was. No model retraining happens here -
@@ -812,7 +982,7 @@ def create_incident_feedback(
 def list_incident_feedback(
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
     feedback = list_feedback_for_incident(db, incident.id)
@@ -822,7 +992,7 @@ def list_incident_feedback(
 @app.get("/learning/stats")
 def learning_stats(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     return get_feedback_stats(db, user.organization_id)
 
@@ -830,7 +1000,7 @@ def learning_stats(
 @app.get("/learning/evaluation")
 def learning_evaluation(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Cross-references real investigation timing/confidence, real analyst
     accuracy ratings, and real human approve/reject decisions - see
@@ -845,7 +1015,7 @@ def investigate_incident(
     request: Request,
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Milestone 3: runs the autonomous multi-agent pipeline (Detection ->
     Investigation -> Threat Intel -> Risk -> Response -> Report) against this
@@ -887,7 +1057,7 @@ def investigate_incident_live(
     request: Request,
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Same investigation as /investigate, but dispatches the chain to a
     Celery worker and returns immediately with a run id instead of
@@ -979,7 +1149,7 @@ def list_all_agent_runs(
     status: Literal["running", "completed", "failed"] | None = None,
     limit: int = Query(default=20, le=100),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Cross-incident feed of recent investigations - what the "AI Team" /
     Coordinator Dashboard view renders, as opposed to
@@ -995,7 +1165,7 @@ def list_all_agent_runs(
 def list_agent_runs(
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
 
@@ -1007,7 +1177,7 @@ def list_agent_runs(
 def get_agent_run(
     run_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     run = _get_scoped_or_404(db, AgentRun, run_id, user.organization_id, "Agent run not found")
     return run.to_detail_dict()
@@ -1017,7 +1187,7 @@ def get_agent_run(
 def list_proposed_actions(
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
 
@@ -1039,7 +1209,7 @@ def review_proposed_action(
     action_id: int,
     payload: ProposedActionReview,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """The human-in-the-loop approval gate: the Response Agent only ever
     proposes actions, and nothing anywhere in this app executes one - this
@@ -1057,7 +1227,7 @@ def review_proposed_action(
 
 
 @app.get("/plugins/connectors")
-def list_connector_plugins(user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer))) -> dict:
+def list_connector_plugins(user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive))) -> dict:
     """The catalog of connector *types* available to configure (app/plugins/
     connectors/) - not an org's configured instances, see GET /connectors
     for those."""
@@ -1065,7 +1235,7 @@ def list_connector_plugins(user: User = Depends(require_roles(Role.admin, Role.a
 
 
 @app.get("/plugins/response-actions")
-def list_response_action_plugins(user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer))) -> dict:
+def list_response_action_plugins(user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive))) -> dict:
     return {"actions": plugin_registry.list_actions()}
 
 
@@ -1079,7 +1249,7 @@ class ConnectorCreate(BaseModel):
 def create_connector(
     payload: ConnectorCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin)),
+    user: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     try:
         plugin_registry.get_connector(payload.plugin_key)
@@ -1101,7 +1271,7 @@ def create_connector(
 @app.get("/connectors")
 def list_connectors(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     instances = db.query(ConnectorInstance).filter(ConnectorInstance.organization_id == user.organization_id).all()
     return {"connectors": [c.to_dict() for c in instances]}
@@ -1116,22 +1286,23 @@ def update_connector_config(
     connector_id: int,
     payload: ConnectorConfigUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin)),
+    user: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     """Merges the given keys into the connector's existing config rather
-    than replacing it wholesale - lets one extra setting (e.g. Slack's
-    critical_channel, see app/slack_bot.py's _maybe_post_to_critical_channel)
-    be added after an OAuth install without an admin ever seeing or
-    re-entering the access_token/team_id/etc. they never typed in
-    themselves."""
+    than replacing it wholesale - lets extra settings (e.g. Slack's
+    critical_channel/soc_team_channel/executive_channel/compliance_channel,
+    see app/slack_bot.py's _post_to_named_channel) be added after an OAuth
+    install without an admin ever seeing or re-entering the
+    access_token/team_id/etc. they never typed in themselves."""
     instance = _get_scoped_or_404(db, ConnectorInstance, connector_id, user.organization_id, "Connector not found")
     merged = {**(instance.config or {}), **payload.config}
-    # A changed critical_channel invalidates any previously cached
-    # critical_channel_id - otherwise notify_new_incident would keep
+    # A changed "*_channel" name invalidates its previously cached
+    # "*_channel_id" - otherwise the relevant notify_* function would keep
     # posting to the *old* channel until some other trigger happened to
     # clear it.
-    if "critical_channel" in payload.config:
-        merged.pop("critical_channel_id", None)
+    for key in payload.config:
+        if key.endswith("_channel"):
+            merged.pop(f"{key}_id", None)
     instance.config = merged
     db.commit()
     db.refresh(instance)
@@ -1142,7 +1313,7 @@ def update_connector_config(
 def test_connector(
     connector_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     instance = _get_scoped_or_404(db, ConnectorInstance, connector_id, user.organization_id, "Connector not found")
     plugin = plugin_registry.get_connector(instance.plugin_key)
@@ -1154,7 +1325,7 @@ def test_connector(
 def sync_connector(
     connector_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Pulls from the connector's external source right now and ingests the
     result through the same app/ingestion.py.ingest() every other source
@@ -1205,8 +1376,8 @@ def slack_authorize(
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only an organization admin can connect Slack")
+    if user.role not in (Role.owner.value, Role.admin.value):
+        raise HTTPException(status_code=403, detail="Only an organization owner or admin can connect Slack")
 
     state = sign_oauth_state(user.organization_id, user.id)
     url = build_authorize_url(state, _slack_authorize_redirect_uri(request))
@@ -1264,10 +1435,22 @@ def slack_callback(
         .first()
     )
     if existing:
-        existing.config = config
+        # A reinstall must never wipe out channel routing an admin already
+        # configured (via PATCH /connectors/{id}) - carry forward any
+        # "*_channel"/"*_channel_id" keys instead of only using the fresh
+        # OAuth response, which knows nothing about them.
+        preserved_channels = {k: v for k, v in (existing.config or {}).items() if "_channel" in k}
+        existing.config = {**config, **preserved_channels}
         existing.enabled = True
         existing.name = f"Slack ({team.get('name', 'workspace')})"
     else:
+        # A brand-new install: auto-create the four optional secondary
+        # channels so this org gets a fully working multi-channel setup
+        # immediately, with nothing for the admin to manually configure -
+        # see slack_bot.py's provision_default_channels for what this does
+        # if channel creation fails or the channels:manage scope is missing
+        # (fails open: install still succeeds, those roles just stay unset).
+        config.update(provision_default_channels(config["access_token"]))
         db.add(ConnectorInstance(
             organization_id=organization_id,
             plugin_key="slack",
@@ -1348,7 +1531,7 @@ class ResponseActionInstanceCreate(BaseModel):
 def create_response_action_instance(
     payload: ResponseActionInstanceCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin)),
+    user: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     try:
         plugin_registry.get_action(payload.plugin_key)
@@ -1370,7 +1553,7 @@ def create_response_action_instance(
 @app.get("/response-action-instances")
 def list_response_action_instances(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     instances = (
         db.query(ResponseActionInstance).filter(ResponseActionInstance.organization_id == user.organization_id).all()
@@ -1382,7 +1565,7 @@ def list_response_action_instances(
 def execute_proposed_action(
     action_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Dispatches an already-approved action to every enabled
     ResponseActionInstance configured for its category. Still no
@@ -1404,11 +1587,25 @@ def execute_proposed_action(
             status_code=400, detail="No enabled response-action integration configured for this action's category"
         )
 
+    # Enriches the base action fields with incident context so integrations
+    # (Jira/ServiceNow/webhook) can render a ticket/message that's actually
+    # useful to whoever picks it up, not just a bare category + incident id.
+    action_payload = action.to_dict()
+    action_payload.update({
+        "incident_title": action.incident.title,
+        "risk_level": action.incident.risk_level,
+        "priority": action.incident.priority,
+        "affected_hosts": action.incident.affected_hosts,
+        "affected_users": action.incident.affected_users,
+        "incident_url": f"{FRONTEND_URL}/incidents/{action.incident_id}",
+        "assignee_email": action.incident.assignee.email if action.incident.assignee else None,
+    })
+
     results = []
     all_ok = True
     for instance in matching:
         plugin = plugin_registry.get_action(instance.plugin_key)
-        ok, message = plugin.execute(instance.config or {}, action.to_dict())
+        ok, message = plugin.execute(instance.config or {}, action_payload)
         results.append({"integration": instance.name, "ok": ok, "message": message})
         all_ok = all_ok and ok
 
@@ -1426,7 +1623,7 @@ def list_threat_indicators(
     indicator_type: Literal["ip", "domain", "url", "hash"] | None = None,
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """The shared Threat Intel Hub - deliberately not org-scoped, unlike
     every other list endpoint in this file (see ThreatIndicator's
@@ -1440,7 +1637,7 @@ def list_threat_indicators(
 @app.post("/threat-intel/sync")
 def sync_threat_intel(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Pulls the real URLhaus feed into the shared indicator table right
     now. Not org-scoped for the same reason listing isn't - one sync
@@ -1458,7 +1655,7 @@ def sync_threat_intel(
 @app.post("/threat-intel/graph/sync")
 def sync_threat_intel_graph(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Rebuilds the shared Indicator/Tag/Source relationship graph in
     Neo4j from the current indicator table + every org's real incident
@@ -1473,7 +1670,7 @@ def sync_threat_intel_graph(
 @app.get("/threat-intel/graph")
 def threat_intel_graph(
     limit: int = Query(default=300, ge=1, le=1000),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     try:
         return get_indicator_graph(user.organization_id, limit)
@@ -1488,7 +1685,7 @@ def _graph_unavailable() -> HTTPException:
 @app.post("/graph/sync")
 def sync_graph(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Rebuilds the Neo4j attack graph from the current Postgres state -
     Host/User/IP/Incident nodes and the relationships between them, derived
@@ -1507,7 +1704,7 @@ def sync_graph(
 def incident_graph(
     incident_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """The Host/User/IP entities tied to one incident and the edges
     between them - the "Attack Graph" tab on an incident."""
@@ -1523,7 +1720,7 @@ def entity_blast_radius(
     type: Literal["host", "user", "ip"],
     value: str,
     hops: int = Query(default=2, ge=1, le=4),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Everything reachable from one host/user/IP within N hops, across
     every incident it appears in - reveals connections a single incident's
@@ -1541,7 +1738,7 @@ def digital_twin_simulate(
     value: str,
     hops: int = Query(default=2, ge=1, le=4),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Real, free (no LLM call) 'what happens if this is compromised'
     simulation - the actual attack-graph blast radius cross-referenced
@@ -1561,7 +1758,7 @@ def digital_twin_narrative(
     value: str,
     hops: int = Query(default=2, ge=1, le=4),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """One Groq call turning the real simulation above into a lateral-
     movement/impact/recovery narrative - same 503/502 distinction every
@@ -1582,7 +1779,7 @@ def digital_twin_narrative(
 @app.get("/graph")
 def full_graph(
     limit: int = Query(default=300, ge=1, le=1000),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """A capped view of the whole attack graph - the general explorer."""
     try:
@@ -1602,7 +1799,7 @@ def update_incident(
     incident_id: int,
     payload: IncidentUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
 
@@ -1612,6 +1809,9 @@ def update_incident(
         if field in updates and updates[field] is None:
             raise HTTPException(status_code=400, detail=f"{field} cannot be null")
 
+    old_status = incident.status
+    status_changed = "status" in updates and updates["status"] != old_status
+
     if "status" in updates:
         incident.status = updates["status"]
         incident.closed_at = datetime.now(timezone.utc) if updates["status"] == "closed" else None
@@ -1619,6 +1819,7 @@ def update_incident(
     if "priority" in updates:
         incident.priority = updates["priority"]
 
+    newly_assigned = None
     if "assignee_id" in updates:
         assignee_id = updates["assignee_id"]
         if assignee_id is not None:
@@ -1630,10 +1831,23 @@ def update_incident(
                 message=f"You've been assigned incident #{incident.id}: {incident.title}",
                 incident_id=incident.id,
             ))
+            newly_assigned = assignee
         incident.assignee_id = assignee_id
 
     db.commit()
     db.refresh(incident)
+
+    if newly_assigned:
+        try:
+            notify_assignment(db, incident, newly_assigned)
+        except Exception:
+            pass
+    if status_changed:
+        try:
+            notify_status_change(db, incident, user, old_status, incident.status)
+        except Exception:
+            pass
+
     return incident.to_detail_dict()
 
 
@@ -1646,7 +1860,7 @@ def add_incident_comment(
     incident_id: int,
     payload: CommentCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
 
@@ -1654,6 +1868,12 @@ def add_incident_comment(
     db.add(comment)
     db.commit()
     db.refresh(comment)
+
+    try:
+        notify_comment(db, incident, user, payload.body)
+    except Exception:
+        pass
+
     return comment.to_dict()
 
 
@@ -1663,7 +1883,7 @@ def list_assets(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     query = db.query(Asset).filter(Asset.organization_id == user.organization_id)
     if q:
@@ -1687,7 +1907,7 @@ def update_asset(
     asset_id: int,
     payload: AssetUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     asset = _get_scoped_or_404(db, Asset, asset_id, user.organization_id, "Asset not found")
 
@@ -1706,7 +1926,7 @@ def update_asset(
 @app.get("/stats")
 def get_stats(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Dashboard aggregates computed over the whole table via SQL
     COUNT/GROUP BY, not a capped list fetched and counted client-side - the
@@ -1746,7 +1966,7 @@ def get_stats(
 @app.get("/executive/summary")
 def executive_summary(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     return get_executive_summary(db, user.organization_id)
 
@@ -1756,7 +1976,7 @@ def executive_summary(
 def executive_briefing(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """One Groq call producing a plain-language leadership briefing,
     grounded strictly in the real aggregates from executive_summary above -
@@ -1775,7 +1995,7 @@ def executive_briefing(
 @app.get("/compliance/controls")
 def list_compliance_controls(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Each control's status is computed fresh against this org's real
     data every call (see app/compliance.py's check registry) - nothing is
@@ -1789,7 +2009,7 @@ def list_compliance_controls(
 def compliance_report(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     controls = evaluate_controls(db, user.organization_id)
     try:
@@ -1798,13 +2018,19 @@ def compliance_report(
         raise HTTPException(status_code=503, detail="AI compliance report isn't configured - set GROQ_API_KEY")
     except ChatProviderError as exc:
         raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
+
+    try:
+        notify_compliance_report(db, user.organization_id, report)
+    except Exception:
+        pass
+
     return {"controls": controls, "report": report}
 
 
 @app.get("/predictive/summary")
 def predictive_summary(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Real, free (no LLM call), computed-fresh-on-every-request signals:
     an IsolationForest anomaly pass over this org's own event history,
@@ -1817,7 +2043,7 @@ def predictive_summary(
 def predictive_briefing(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """One Groq call interpreting the real statistical signals from
     predictive_summary into a forward-looking ('likely', not 'happened')
@@ -1834,7 +2060,7 @@ def predictive_briefing(
 
 @app.get("/observability/ai-summary")
 def ai_observability_summary(
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Real per-feature AI usage/cost/latency/success-rate, read live off
     this process's own Prometheus counters (app/observability.py) - the
@@ -1845,7 +2071,7 @@ def ai_observability_summary(
 @app.get("/marketplace/playbooks")
 def list_marketplace_playbooks(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     installed_ids = {p.id for p in list_installed_playbooks(db, user.organization_id)}
     return {
@@ -1857,7 +2083,7 @@ def list_marketplace_playbooks(
 def install_marketplace_playbook(
     playbook_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin)),
+    user: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     playbook = db.get(PlaybookTemplate, playbook_id)
     if playbook is None:
@@ -1871,7 +2097,7 @@ def install_marketplace_playbook(
 def uninstall_marketplace_playbook(
     playbook_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin)),
+    user: User = Depends(require_roles(Role.owner, Role.admin)),
 ) -> dict:
     playbook = db.get(PlaybookTemplate, playbook_id)
     if playbook is None:
@@ -1883,7 +2109,7 @@ def uninstall_marketplace_playbook(
 @app.get("/command-center/queue")
 def command_center_queue(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     return get_command_center_queue(db, user.organization_id)
 
@@ -1896,7 +2122,7 @@ class ShiftNoteCreate(BaseModel):
 def create_shift_note(
     payload: ShiftNoteCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     if not payload.body.strip():
         raise HTTPException(status_code=422, detail="body cannot be empty")
@@ -1911,7 +2137,7 @@ def create_shift_note(
 def list_shift_notes(
     limit: int = Query(20, le=100),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     notes = (
         db.query(ShiftNote)
@@ -1927,7 +2153,7 @@ def list_shift_notes(
 def search(
     q: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     like = f"%{q}%"
     org_id = user.organization_id
@@ -1970,10 +2196,10 @@ def search(
 @app.get("/rag/search")
 def semantic_search(
     q: str = Query(..., min_length=1),
-    content_type: Literal["event", "incident"] | None = None,
+    content_type: Literal["event", "incident", "knowledge_chunk"] | None = None,
     k: int = 5,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Meaning-based search (embeddings + cosine similarity), unlike
     /search above which is a plain SQL ILIKE substring match. This is the
@@ -1992,7 +2218,7 @@ def chat(
     request: Request,
     payload: ChatRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """RAG in full: semantic search for evidence, then a Groq call grounded
     in that evidence. Distinguishes a missing API key (503 - not configured)
@@ -2026,7 +2252,7 @@ def natural_language_query(
     request: Request,
     payload: QueryRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Translates a natural-language question into the SAME structured filter
     fields /events already accepts (event_type, severity, username, host,

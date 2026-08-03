@@ -37,7 +37,9 @@ def test_viewer_cannot_ingest(client, viewer_headers):
 def test_simulate_ingests_multi_source_scenario_and_is_searchable(client, analyst_headers):
     response = client.post("/simulate/phishing_ransomware", headers=analyst_headers)
     assert response.status_code == 200
-    sources = response.json()["sources"]
+    body = response.json()
+    assert body["mode"] == "synthetic"  # no real cluster access in tests (see conftest.py)
+    sources = body["sources"]
     assert sources["windows"]["ingested"] > 0
     assert sources["firewall"]["ingested"] > 0
     assert sources["syslog"]["ingested"] > 0
@@ -47,6 +49,27 @@ def test_simulate_ingests_multi_source_scenario_and_is_searchable(client, analys
 
     search = client.get("/events", params={"q": "185.220.101.45"}, headers=analyst_headers).json()
     assert search["total"] >= 1
+
+
+def test_simulate_uses_real_bas_campaign_when_cluster_available(client, analyst_headers):
+    from unittest.mock import patch
+
+    fake_event = {
+        "timestamp": "2026-07-31T00:00:00+00:00", "host": "sentraops-bas-target-1", "username": "bas-simulation",
+        "event_type": "bas_t1082", "severity": "low", "message": "[BAS] T1082 System Information Discovery - exit 0: Linux",
+    }
+    with patch("app.main.bas.run_campaign", return_value=[fake_event]):
+        response = client.post("/simulate/phishing_ransomware", headers=analyst_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "real"
+    assert body["sources"]["bas"]["ingested"] == 1
+
+
+def test_simulate_unknown_scenario_400s_regardless_of_cluster_availability(client, analyst_headers):
+    response = client.post("/simulate/not-a-real-scenario", headers=analyst_headers)
+    assert response.status_code == 400
 
 
 def test_viewer_can_read_events(client, analyst_headers, viewer_headers):

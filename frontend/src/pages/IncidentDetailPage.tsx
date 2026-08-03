@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct } from '../auth/roles'
 import { AgentInvestigationPanel } from '../components/AgentInvestigationPanel'
 import { AttackGraphView } from '../components/AttackGraphView'
 import { AttackReplayPanel } from '../components/AttackReplayPanel'
@@ -16,17 +17,23 @@ const PRIORITIES: Severity[] = ['low', 'medium', 'high', 'critical']
 export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
-  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const canAct = roleCanAct(user?.role)
 
   const [incident, setIncident] = useState<IncidentDetail | null>(null)
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
-  const [showReport, setShowReport] = useState(false)
+  // Persisted (not plain useState) so an expanded report stays expanded
+  // across a refresh instead of silently re-collapsing - the report text
+  // itself was never actually lost (it's just incident.report), but the
+  // panel snapping shut on every reload looked exactly like data loss.
+  const [showReportPersisted, setShowReport] = usePersistentState<boolean>(`incident-show-report-${id}`, false)
+  const showReport = showReportPersisted ?? false
   const [commentBody, setCommentBody] = useState('')
   const [postingComment, setPostingComment] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [slackSendMessage, setSlackSendMessage] = useState<string | null>(null)
   const [explanation, setExplanation] = usePersistentState<IncidentExplanation>(`incident-analysis-${id}`)
   const [explaining, setExplaining] = useState(false)
   const [explainError, setExplainError] = useState<string | null>(null)
@@ -128,10 +135,21 @@ export function IncidentDetailPage() {
   async function handleDownloadReport() {
     if (!incident) return
     setActionError(null)
+    setSlackSendMessage(null)
     try {
       await api.downloadIncidentReport(incident.id)
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : 'Failed to download report')
+    }
+    // Best-effort, independent of the download itself - a Slack failure
+    // (not connected, upload rejected, ...) must never block the file the
+    // user actually asked for, which just succeeded or failed above on its
+    // own.
+    try {
+      const res = await api.sendIncidentReportToSlack(incident.id)
+      setSlackSendMessage(res.message)
+    } catch (err) {
+      setSlackSendMessage(err instanceof ApiError ? err.message : 'Failed to send report to Slack')
     }
   }
 
@@ -169,6 +187,9 @@ export function IncidentDetailPage() {
       {actionError && (
         <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{actionError}</p>
       )}
+      {slackSendMessage && (
+        <p className="text-sm text-muted-foreground bg-card/60 border border-secondary rounded-lg px-3 py-2">{slackSendMessage}</p>
+      )}
 
       <div className="panel p-5 space-y-4">
         <div className="flex items-start justify-between gap-4">
@@ -180,8 +201,9 @@ export function IncidentDetailPage() {
           </div>
           <div className="flex gap-2 shrink-0">
             <button
-              onClick={handleDownloadReport}
+              onClick={() => void handleDownloadReport()}
               className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition"
+              title="Downloads the report to your machine, and sends a copy to Slack if connected"
             >
               Download report
             </button>

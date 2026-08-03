@@ -83,7 +83,7 @@ class User(Base):
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    role = Column(String(20), nullable=False, default="viewer")
+    role = Column(String(20), nullable=False, default="auditor")
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
@@ -415,11 +415,40 @@ class Embedding(Base):
 
     id = Column(Integer, primary_key=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    content_type = Column(String(50), nullable=False, index=True)  # "event" | "incident"
+    content_type = Column(String(50), nullable=False, index=True)  # "event" | "incident" | "knowledge_chunk"
     content_id = Column(Integer, nullable=True, index=True)
     text = Column(Text, nullable=False)
     vector = Column(EmbeddingVector, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class KnowledgeDocument(Base):
+    """Metadata for one uploaded Knowledge Base document. The actual
+    searchable text lives as one or more Embedding rows (content_type=
+    "knowledge_chunk", content_id=this row's id) - this table exists only
+    so the KB page has something to list/delete without re-deriving a
+    document's chunks from scratch each time."""
+
+    __tablename__ = "knowledge_documents"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    filename = Column(String(255), nullable=True)
+    source = Column(String(20), nullable=False, default="upload")  # "upload" | "seed"
+    chunk_count = Column(Integer, nullable=False, default=0)
+    uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "filename": self.filename,
+            "source": self.source,
+            "chunk_count": self.chunk_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
 
 class ConnectorInstance(Base):

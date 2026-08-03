@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct } from '../auth/roles'
 import { AttackGraphView } from '../components/AttackGraphView'
 import type { GraphData, ThreatIndicator, ThreatIndicatorType } from '../api/types'
 
@@ -14,7 +15,7 @@ const TYPE_OPTIONS: { value: ThreatIndicatorType | ''; label: string }[] = [
 
 export function ThreatIntelPage() {
   const { user } = useAuth()
-  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const canAct = roleCanAct(user?.role)
 
   const [indicators, setIndicators] = useState<ThreatIndicator[]>([])
   const [q, setQ] = useState('')

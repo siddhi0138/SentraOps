@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, slackAuthorizeUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct, isAdminRole } from '../auth/roles'
 import type {
   ConnectorInstance,
   ConnectorPluginType,
@@ -110,14 +111,27 @@ function ConfigForm({
   )
 }
 
-function CriticalChannelEditor({ connector, onSaved }: { connector: ConnectorInstance; onSaved: () => void }) {
-  const [value, setValue] = useState(connector.config.critical_channel ?? '')
+const CHANNEL_ROLES: { key: string; label: string; placeholder: string }[] = [
+  { key: 'critical_channel', label: 'Critical incidents also go to', placeholder: 'critical-incidents' },
+  { key: 'soc_team_channel', label: 'Investigation progress & approvals go to', placeholder: 'soc-team' },
+  { key: 'executive_channel', label: 'Daily summary goes to', placeholder: 'executive-security' },
+  { key: 'compliance_channel', label: 'Compliance reports go to', placeholder: 'compliance' },
+]
+
+function ChannelField({ connector, onSaved, roleKey, label, placeholder }: {
+  connector: ConnectorInstance
+  onSaved: () => void
+  roleKey: string
+  label: string
+  placeholder: string
+}) {
+  const [value, setValue] = useState(connector.config[roleKey] ?? '')
   const [saving, setSaving] = useState(false)
 
   async function save() {
     setSaving(true)
     try {
-      await api.updateConnectorConfig(connector.id, { critical_channel: value.trim() })
+      await api.updateConnectorConfig(connector.id, { [roleKey]: value.trim() })
       await onSaved()
     } finally {
       setSaving(false)
@@ -125,10 +139,10 @@ function CriticalChannelEditor({ connector, onSaved }: { connector: ConnectorIns
   }
 
   return (
-    <div className="mt-2 flex items-center gap-2">
-      <span className="text-xs text-muted-foreground shrink-0">Also alert critical incidents to:</span>
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-muted-foreground shrink-0 w-64">{label}:</span>
       <input
-        placeholder="critical-incidents"
+        placeholder={placeholder}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         className="w-40 rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
@@ -140,9 +154,22 @@ function CriticalChannelEditor({ connector, onSaved }: { connector: ConnectorIns
       >
         {saving ? 'Saving...' : 'Save'}
       </button>
-      {connector.config.critical_channel && (
-        <span className="text-xs text-muted-foreground">currently: #{connector.config.critical_channel}</span>
-      )}
+      {connector.config[roleKey] && <span className="text-xs text-muted-foreground">currently: #{connector.config[roleKey]}</span>}
+    </div>
+  )
+}
+
+function ChannelRoutingEditor({ connector, onSaved }: { connector: ConnectorInstance; onSaved: () => void }) {
+  return (
+    <div className="mt-3 space-y-2 border-t border-border pt-3">
+      <p className="text-xs text-muted-foreground">
+        Optional - everything already goes to your default channel. Point specific message types at additional
+        channels too, matching how a real SOC team splits alerts/investigation-noise/executive summaries/compliance
+        into separate channels. Leave any of these blank to keep using just the default channel.
+      </p>
+      {CHANNEL_ROLES.map((role) => (
+        <ChannelField key={role.key} connector={connector} onSaved={onSaved} roleKey={role.key} label={role.label} placeholder={role.placeholder} />
+      ))}
     </div>
   )
 }
@@ -317,7 +344,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
                 </div>
               )}
             </div>
-            {canOperate && c.plugin_key === 'slack' && <CriticalChannelEditor connector={c} onSaved={load} />}
+            {canOperate && c.plugin_key === 'slack' && <ChannelRoutingEditor connector={c} onSaved={load} />}
           </div>
         ))}
         {instances.length === 0 && <p className="text-sm text-muted-foreground">No connectors configured yet.</p>}
@@ -418,8 +445,8 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
 
 export function IntegrationsPage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
-  const canOperate = isAdmin || user?.role === 'analyst'
+  const isAdmin = isAdminRole(user?.role)
+  const canOperate = roleCanAct(user?.role)
 
   return (
     <div className="space-y-8">

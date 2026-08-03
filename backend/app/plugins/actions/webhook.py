@@ -22,12 +22,33 @@ class WebhookAction(ResponseActionPlugin):
         if not url:
             return False, "config.webhook_url is required"
 
-        text = (
-            f"[SentraOps] {action['category'].upper()} action approved "
-            f"for incident #{action['incident_id']}: {action['description']}"
+        incident_title = action.get("incident_title")
+        header = (
+            f"[SentraOps] {action['category'].upper()} approved - {incident_title}"
+            if incident_title
+            else f"[SentraOps] {action['category'].upper()} action approved for incident #{action['incident_id']}"
         )
+        detail_lines = [action["description"]]
+        if action.get("risk_level"):
+            detail_lines.append(f"Risk: {action['risk_level']} ({action.get('priority', 'unknown')} priority)")
+        if action.get("affected_hosts"):
+            detail_lines.append(f"Hosts: {', '.join(action['affected_hosts'])}")
+        if action.get("affected_users"):
+            detail_lines.append(f"Users: {', '.join(action['affected_users'])}")
+
+        # `content`/`text` (plain, Discord-flavored) works everywhere as a
+        # fallback; `blocks` (Slack mrkdwn) is an extra key Slack renders
+        # richly and Discord/generic receivers simply ignore.
+        incident_url = action.get("incident_url")
+        plain_text = "\n".join([header, *detail_lines, incident_url] if incident_url else [header, *detail_lines])
+        slack_header = f"*{header}*" if not incident_url else f"*<{incident_url}|{header}>*"
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": slack_header}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(detail_lines)}},
+        ]
+
         try:
-            response = httpx.post(url, json={"text": text, "content": text}, timeout=10)
+            response = httpx.post(url, json={"text": plain_text, "content": plain_text, "blocks": blocks}, timeout=10)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             return False, f"Webhook POST failed: {exc}"

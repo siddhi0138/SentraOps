@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { canAct as roleCanAct } from '../auth/roles'
 import type { ComplianceControl, ComplianceReport, ComplianceStatus } from '../api/types'
 
 const STATUS_STYLES: Record<ComplianceStatus, string> = {
@@ -25,7 +26,7 @@ function StatusBadge({ status }: { status: ComplianceStatus }) {
 
 export function ComplianceCenterPage() {
   const { user } = useAuth()
-  const canAct = user?.role === 'admin' || user?.role === 'analyst'
+  const canAct = roleCanAct(user?.role)
 
   const [controls, setControls] = useState<ComplianceControl[]>([])
   const [report, setReport] = useState<ComplianceReport | null>(null)

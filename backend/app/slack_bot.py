@@ -23,6 +23,62 @@ _AGENT_DISPLAY_NAMES = {
 _RATING_LABEL = {"accurate": "Accurate", "false_positive": "False Positive", "missed_detection": "Missed Detection"}
 
 
+def send_report_to_slack(db: Session, incident: Incident) -> tuple[bool, str]:
+    """Backs the Download Report button's "also send to Slack" behavior -
+    uploads incident.report as a real .md file into the org's default
+    channel via Slack's three-step external-upload flow (getUploadURLExternal
+    -> upload the bytes -> completeUploadExternal), the current recommended
+    way to share a file (the older files.upload endpoint is deprecated).
+    Needs the files:write scope - an org that installed Slack before this
+    scope existed will need to reinstall before this works, same as
+    chat:write.public was needed before critical-channel routing worked."""
+    connector = get_org_slack_connector(db, incident.organization_id)
+    if not connector:
+        return False, "Slack isn't connected for this organization"
+    config = connector.config or {}
+    token = config.get("access_token")
+    channel_id = config.get("channel_id")
+    if not token or not channel_id:
+        return False, "Slack isn't fully configured for this organization"
+
+    content = (incident.report or "").encode("utf-8")
+    filename = f"incident-{incident.id}-report.md"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        url_resp = httpx.post(
+            f"{SLACK_API}/files.getUploadURLExternal",
+            headers=headers,
+            data={"filename": filename, "length": len(content)},
+            timeout=15,
+        )
+        url_data = url_resp.json()
+        if not url_data.get("ok"):
+            return False, f"Slack rejected the upload request: {url_data.get('error', 'unknown error')}"
+
+        upload_resp = httpx.post(url_data["upload_url"], files={"file": (filename, content)}, timeout=30)
+        if not upload_resp.is_success:
+            return False, f"Slack file upload failed (HTTP {upload_resp.status_code})"
+
+        complete_resp = httpx.post(
+            f"{SLACK_API}/files.completeUploadExternal",
+            headers=headers,
+            json={
+                "files": [{"id": url_data["file_id"], "title": f"Incident #{incident.id} report"}],
+                "channel_id": channel_id,
+                "initial_comment": f"Report for incident #{incident.id}: {incident.title}",
+            },
+            timeout=15,
+        )
+        complete_data = complete_resp.json()
+        if not complete_data.get("ok"):
+            return False, f"Slack rejected finalizing the upload: {complete_data.get('error', 'unknown error')}"
+    except httpx.HTTPError as exc:
+        return False, f"Slack upload failed: {exc}"
+
+    return True, "Report sent to Slack"
+
+
 def get_org_slack_connector(db: Session, organization_id: int) -> ConnectorInstance | None:
     return (
         db.query(ConnectorInstance)
@@ -111,34 +167,112 @@ def _post_to_channel(token: str, channel_id: str, blocks: list[dict], text: str)
         return False
 
 
-def _maybe_post_to_critical_channel(db: Session, connector: ConnectorInstance, incident: Incident, blocks: list[dict], text: str) -> None:
-    """Additive, not a replacement: a critical incident still posts to the
-    default channel via notify_new_incident's own _post_message call - this
-    is the *extra* copy into a dedicated channel, for orgs that configured
-    one (PATCH /connectors/{id} with {"config": {"critical_channel": "..."}}).
-    A no-op for any org that hasn't set critical_channel, or for
-    non-critical incidents."""
-    if incident.risk_level != "critical":
-        return
-    config = connector.config or {}
-    critical_channel_name = config.get("critical_channel")
-    token = config.get("access_token")
-    if not critical_channel_name or not token:
-        return
+# The four secondary-channel roles an org can optionally name, beyond the
+# one default channel every install already has (the incoming-webhook
+# channel picked on Slack's consent screen). Each is a plain channel-name
+# string in connector.config, e.g. {"soc_team_channel": "soc-team"} - see
+# PATCH /connectors/{id}. Matches the #security-alerts (default) /
+# #critical-incidents / #soc-team / #executive-security / #compliance
+# channel-per-purpose pattern real SOC teams actually use, without forcing
+# every org to create all five - anything left unset just falls back to
+# the one default channel.
+CRITICAL_CHANNEL = "critical_channel"
+SOC_TEAM_CHANNEL = "soc_team_channel"
+EXECUTIVE_CHANNEL = "executive_channel"
+COMPLIANCE_CHANNEL = "compliance_channel"
 
-    channel_id = config.get("critical_channel_id")
+_DEFAULT_CHANNEL_NAMES = {
+    CRITICAL_CHANNEL: "critical-incidents",
+    SOC_TEAM_CHANNEL: "soc-team",
+    EXECUTIVE_CHANNEL: "executive-security",
+    COMPLIANCE_CHANNEL: "compliance",
+}
+
+
+def _create_or_find_channel(token: str, name: str) -> str | None:
+    """Creates a public channel via conversations.create - if it already
+    exists (Slack returns error "name_taken", e.g. a re-install, or two
+    orgs on the same workspace during testing), falls back to looking it up
+    instead of failing, so this is safe to call more than once."""
+    try:
+        response = httpx.post(
+            f"{SLACK_API}/conversations.create",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"name": name, "is_private": "false"},
+            timeout=15,
+        )
+        data = response.json()
+    except httpx.HTTPError:
+        return None
+    if data.get("ok"):
+        return data["channel"]["id"]
+    if data.get("error") == "name_taken":
+        return _resolve_channel_id(token, name)
+    return None
+
+
+def provision_default_channels(token: str) -> dict:
+    """Fired once, right after a fresh OAuth install (see slack_callback in
+    main.py) - auto-creates the four optional secondary channels
+    (critical-incidents / soc-team / executive-security / compliance) so
+    every org gets a fully working multi-channel setup with zero manual
+    setup, instead of the admin having to create each channel by hand and
+    fill in a form (PATCH /connectors/{id} still lets them rename any of
+    these to point at their own existing channels instead, later). Best
+    effort per channel - a failure to create/find one just leaves that role
+    unset, falling back to the default channel, never blocking the install
+    itself."""
+    config: dict[str, str] = {}
+    for channel_key, channel_name in _DEFAULT_CHANNEL_NAMES.items():
+        channel_id = _create_or_find_channel(token, channel_name)
+        if channel_id:
+            config[channel_key] = channel_name
+            config[f"{channel_key}_id"] = channel_id
+    return config
+
+
+def _post_to_named_channel(db: Session, connector: ConnectorInstance, channel_key: str, blocks: list[dict], text: str) -> bool:
+    """Posts to one org-configured secondary channel (channel_key is one of
+    the *_CHANNEL constants above) via chat.postMessage - resolves the
+    channel name to an id via conversations.list once, then caches it under
+    "{channel_key}_id" so every later post skips the lookup (PATCH
+    /connectors/{id} clears the cached id whenever the name changes).
+    Returns False (not an exception) for "nothing configured" or "couldn't
+    resolve/post", so callers can fall back to the default channel."""
+    config = connector.config or {}
+    channel_name = config.get(channel_key)
+    token = config.get("access_token")
+    if not channel_name or not token:
+        return False
+
+    cache_key = f"{channel_key}_id"
+    channel_id = config.get(cache_key)
     if not channel_id:
-        channel_id = _resolve_channel_id(token, critical_channel_name)
+        channel_id = _resolve_channel_id(token, channel_name)
         if not channel_id:
-            return
-        # Cache the resolved id so every subsequent critical incident skips
-        # the conversations.list round-trip - only re-resolved if the admin
-        # changes critical_channel (see the PATCH endpoint in main.py, which
-        # clears critical_channel_id whenever critical_channel changes).
-        connector.config = {**config, "critical_channel_id": channel_id}
+            return False
+        connector.config = {**config, cache_key: channel_id}
         db.commit()
 
-    _post_to_channel(token, channel_id, blocks, text)
+    return _post_to_channel(token, channel_id, blocks, text)
+
+
+def _post_to_channel_or_default(db: Session, connector: ConnectorInstance, channel_key: str, blocks: list[dict], text: str) -> None:
+    """For message types that have exactly one home (unlike the new-incident
+    alert, which always goes to the default channel *and* optionally also
+    to critical_channel) - posts to the named secondary channel if the org
+    configured one, otherwise falls back to the one default channel, so
+    orgs that haven't set up channel routing still get every message
+    somewhere, not silently nowhere."""
+    if _post_to_named_channel(db, connector, channel_key, blocks, text):
+        return
+    webhook_url = (connector.config or {}).get("incoming_webhook_url")
+    if not webhook_url:
+        return
+    try:
+        _post_message(webhook_url, blocks, text)
+    except httpx.HTTPError:
+        pass
 
 
 def notify_new_incident(db: Session, incident: Incident) -> None:
@@ -186,7 +320,8 @@ def notify_new_incident(db: Session, incident: Incident) -> None:
     except httpx.HTTPError:
         pass
 
-    _maybe_post_to_critical_channel(db, connector, incident, blocks, text)
+    if incident.risk_level == "critical":
+        _post_to_named_channel(db, connector, CRITICAL_CHANNEL, blocks, text)
 
 
 def notify_proposed_actions(db: Session, incident: Incident, proposed_actions: list[ProposedAction]) -> None:
@@ -201,44 +336,40 @@ def notify_proposed_actions(db: Session, incident: Incident, proposed_actions: l
     connector = get_org_slack_connector(db, incident.organization_id)
     if not connector:
         return
-    webhook_url = (connector.config or {}).get("incoming_webhook_url")
-    if not webhook_url:
-        return
 
     incident_url = f"{FRONTEND_URL}/incidents/{incident.id}"
-    try:
-        for action in proposed_actions:
-            blocks = [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*Proposed {action.category} action* for <{incident_url}|incident #{incident.id}>:\n{action.description}",
+    for action in proposed_actions:
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Proposed {action.category} action* for <{incident_url}|incident #{incident.id}>:\n{action.description}",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Approve"},
+                        "style": "primary",
+                        "value": f"{action.id}:approved",
+                        "action_id": "review_action",
                     },
-                },
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Approve"},
-                            "style": "primary",
-                            "value": f"{action.id}:approved",
-                            "action_id": "review_action",
-                        },
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Reject"},
-                            "style": "danger",
-                            "value": f"{action.id}:rejected",
-                            "action_id": "review_action",
-                        },
-                    ],
-                },
-            ]
-            _post_message(webhook_url, blocks, text=f"Proposed action for incident #{incident.id}: {action.description}")
-    except httpx.HTTPError:
-        pass
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Reject"},
+                        "style": "danger",
+                        "value": f"{action.id}:rejected",
+                        "action_id": "review_action",
+                    },
+                ],
+            },
+        ]
+        _post_to_channel_or_default(
+            db, connector, SOC_TEAM_CHANNEL, blocks, text=f"Proposed action for incident #{incident.id}: {action.description}"
+        )
 
 
 def notify_agent_progress(db: Session, run: AgentRun, incident: Incident, agent_name: str, message: str | None) -> None:
@@ -251,35 +382,23 @@ def notify_agent_progress(db: Session, run: AgentRun, incident: Incident, agent_
     connector = get_org_slack_connector(db, run.organization_id)
     if not connector:
         return
-    webhook_url = (connector.config or {}).get("incoming_webhook_url")
-    if not webhook_url:
-        return
 
     display_name = _AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
     incident_url = f"{FRONTEND_URL}/incidents/{incident.id}"
     text = f"*{display_name}* completed for <{incident_url}|incident #{incident.id}>"
     if message:
         text += f"\n{message[:400]}"
-    try:
-        _post_message(webhook_url, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text=text)
-    except httpx.HTTPError:
-        pass
+    _post_to_channel_or_default(db, connector, SOC_TEAM_CHANNEL, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text)
 
 
 def notify_run_failed(db: Session, run: AgentRun, incident: Incident, error: str | None) -> None:
     connector = get_org_slack_connector(db, run.organization_id)
     if not connector:
         return
-    webhook_url = (connector.config or {}).get("incoming_webhook_url")
-    if not webhook_url:
-        return
 
     incident_url = f"{FRONTEND_URL}/incidents/{incident.id}"
     text = f":warning: Investigation failed for <{incident_url}|incident #{incident.id}>: {error or 'unknown error'}"
-    try:
-        _post_message(webhook_url, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text=text)
-    except httpx.HTTPError:
-        pass
+    _post_to_channel_or_default(db, connector, SOC_TEAM_CHANNEL, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text)
 
 
 def notify_feedback(db: Session, feedback: AnalystFeedback) -> None:
@@ -307,6 +426,57 @@ def notify_feedback(db: Session, feedback: AnalystFeedback) -> None:
         pass
 
 
+def notify_compliance_report(db: Session, organization_id: int, report: dict) -> None:
+    """Fired when someone generates a compliance report (POST
+    /compliance/report in main.py) - routed to compliance_channel if the org
+    configured one, otherwise the default channel. A no-op, not an error, if
+    Slack isn't connected at all - report generation must never depend on
+    Slack being set up."""
+    connector = get_org_slack_connector(db, organization_id)
+    if not connector:
+        return
+
+    text = f"*Compliance report ready*\n*Posture:* {report.get('overall_posture', 'unknown')}\n{report.get('summary', '')}"
+    _post_to_channel_or_default(db, connector, COMPLIANCE_CHANNEL, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text)
+
+
+def notify_assignment(db: Session, incident: Incident, assignee: User) -> None:
+    """Fired when an incident is assigned to someone (PATCH
+    /incidents/{id} in main.py) - mirrors the in-app Notification that
+    endpoint already creates, just surfaced in Slack too. Routed to
+    soc_team_channel (workflow noise, same bucket as investigation
+    progress/approvals), falling back to the default channel."""
+    connector = get_org_slack_connector(db, incident.organization_id)
+    if not connector:
+        return
+    incident_url = f"{FRONTEND_URL}/incidents/{incident.id}"
+    text = f"*{assignee.email}* was assigned <{incident_url}|incident #{incident.id}: {incident.title}>"
+    _post_to_channel_or_default(db, connector, SOC_TEAM_CHANNEL, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text)
+
+
+def notify_status_change(db: Session, incident: Incident, actor: User, old_status: str, new_status: str) -> None:
+    """Fired when an incident's status actually changes (PATCH
+    /incidents/{id}) - not fired for a PATCH that touches priority/assignee
+    only, or one that sets status to the value it already had."""
+    connector = get_org_slack_connector(db, incident.organization_id)
+    if not connector:
+        return
+    incident_url = f"{FRONTEND_URL}/incidents/{incident.id}"
+    text = f"*{actor.email}* changed <{incident_url}|incident #{incident.id}> status: *{old_status}* -> *{new_status}*"
+    _post_to_channel_or_default(db, connector, SOC_TEAM_CHANNEL, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text)
+
+
+def notify_comment(db: Session, incident: Incident, author: User, body: str) -> None:
+    """Fired when someone comments on an incident (POST
+    /incidents/{id}/comments)."""
+    connector = get_org_slack_connector(db, incident.organization_id)
+    if not connector:
+        return
+    incident_url = f"{FRONTEND_URL}/incidents/{incident.id}"
+    text = f"*{author.email}* commented on <{incident_url}|incident #{incident.id}>:\n> {body[:300]}"
+    _post_to_channel_or_default(db, connector, SOC_TEAM_CHANNEL, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text)
+
+
 def send_daily_summaries(db: Session) -> None:
     """Celery Beat hook (app/celery_app.py's beat_schedule + the
     daily_slack_summaries_task in app/tasks.py) - posts the same AI
@@ -320,8 +490,7 @@ def send_daily_summaries(db: Session) -> None:
         .all()
     )
     for connector in connectors:
-        webhook_url = (connector.config or {}).get("incoming_webhook_url")
-        if not webhook_url:
+        if not (connector.config or {}).get("incoming_webhook_url"):
             continue
         summary = get_summary(db, connector.organization_id)
         try:
@@ -329,10 +498,7 @@ def send_daily_summaries(db: Session) -> None:
         except (ChatConfigError, ChatProviderError):
             continue
         text = f"*Daily SentraOps Summary*\n*{briefing['headline']}*\n{briefing['summary']}"
-        try:
-            _post_message(webhook_url, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text=text)
-        except httpx.HTTPError:
-            pass
+        _post_to_channel_or_default(db, connector, EXECUTIVE_CHANNEL, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], text)
 
 
 def handle_slash_command(db: Session, team_id: str, text: str) -> dict:

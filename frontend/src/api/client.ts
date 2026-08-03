@@ -19,6 +19,10 @@ import type {
   IncidentMemory,
   IncidentStatus,
   IncidentSummary,
+  BasRunResult,
+  BasTechnique,
+  KnowledgeDocument,
+  SimulateResult,
   ProposedAction,
   ProposedActionReviewStatus,
   QueryResult,
@@ -158,20 +162,48 @@ async function authedFetch(url: URL, method: string, body?: unknown, auth = true
   return res
 }
 
+async function handleErrorResponse(res: Response): Promise<never> {
+  let detail = res.statusText
+  try {
+    const data = await res.json()
+    detail = data.detail ?? detail
+  } catch {
+    /* body wasn't JSON; fall back to statusText */
+  }
+  throw new ApiError(res.status, detail)
+}
+
+// Separate from authedFetch: a FormData body must NOT get the
+// Content-Type: application/json header (or JSON.stringify'd) - the browser
+// needs to set its own multipart boundary.
+async function authedUpload(url: URL, formData: FormData): Promise<Response> {
+  const doFetch = () => {
+    const headers: Record<string, string> = {}
+    const token = getAccessToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+    return fetch(url.toString(), { method: 'POST', headers, body: formData })
+  }
+
+  let res = await doFetch()
+  if (res.status === 401 && (await refreshAccessToken())) {
+    res = await doFetch()
+  }
+  return res
+}
+
+async function uploadFile<T>(path: string, file: File, params?: Record<string, string | number | undefined>): Promise<T> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await authedUpload(buildUrl(path, params), formData)
+  if (!res.ok) return handleErrorResponse(res)
+  return res.json() as Promise<T>
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, params, auth = true } = options
   const res = await authedFetch(buildUrl(path, params), method, body, auth)
 
-  if (!res.ok) {
-    let detail = res.statusText
-    try {
-      const data = await res.json()
-      detail = data.detail ?? detail
-    } catch {
-      /* body wasn't JSON; fall back to statusText */
-    }
-    throw new ApiError(res.status, detail)
-  }
+  if (!res.ok) return handleErrorResponse(res)
 
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -219,7 +251,7 @@ export const api = {
   explainEvent: (id: number) => request<EventExplanation>(`/events/${id}/explain`),
   naturalLanguageQuery: (question: string) => request<QueryResult>('/query', { method: 'POST', body: { question } }),
 
-  simulate: (scenario: string) => request<unknown>(`/simulate/${scenario}`, { method: 'POST' }),
+  simulate: (scenario: string) => request<SimulateResult>(`/simulate/${scenario}`, { method: 'POST' }),
   correlate: () => request<{ incidents_created: number; incidents: IncidentSummary[] }>('/correlate', { method: 'POST' }),
 
   listIncidents: (params: { status?: string; risk_level?: string; limit?: number; offset?: number }) =>
@@ -228,6 +260,8 @@ export const api = {
     downloadFile('/incidents/export.csv', params, 'incidents.csv'),
   getIncident: (id: number) => request<IncidentDetail>(`/incidents/${id}`),
   downloadIncidentReport: (id: number) => downloadFile(`/incidents/${id}/report.md`, undefined, `incident-${id}-report.md`),
+  sendIncidentReportToSlack: (id: number) =>
+    request<{ ok: boolean; message: string }>(`/incidents/${id}/report/send-to-slack`, { method: 'POST' }),
   explainIncident: (id: number, audience: 'analyst' | 'executive' = 'analyst') =>
     request<IncidentExplanation>(`/incidents/${id}/explain`, { params: { audience } }),
   similarIncidents: (id: number) => request<{ incident_id: number; matches: SimilarIncident[] }>(`/incidents/${id}/similar`),
@@ -324,6 +358,16 @@ export const api = {
   listThreatIndicators: (params: { q?: string; indicator_type?: ThreatIndicatorType; limit?: number } = {}) =>
     request<{ indicators: ThreatIndicator[] }>('/threat-intel/indicators', { params }),
   syncThreatIntel: () => request<{ synced: number }>('/threat-intel/sync', { method: 'POST' }),
+
+  listBasTechniques: () => request<{ techniques: BasTechnique[] }>('/bas/techniques'),
+  runBasCampaign: (technique_ids: string[]) => request<BasRunResult>('/bas/run', { method: 'POST', body: { technique_ids } }),
+  teardownBasTarget: () => request<{ deleted: boolean }>('/bas/target', { method: 'DELETE' }),
+
+  listKnowledgeDocuments: () => request<{ documents: KnowledgeDocument[] }>('/knowledge-base'),
+  uploadKnowledgeDocument: (file: File, title?: string) =>
+    uploadFile<KnowledgeDocument>('/knowledge-base/upload', file, title ? { title } : undefined),
+  deleteKnowledgeDocument: (id: number) => request<{ deleted: boolean }>(`/knowledge-base/${id}`, { method: 'DELETE' }),
+  seedKnowledgeBaseSamples: () => request<{ created: KnowledgeDocument[] }>('/knowledge-base/seed-samples', { method: 'POST' }),
 
   getStreamingStatus: () => request<StreamingStatus>('/streaming/status'),
   sendTestStreamLog: () =>

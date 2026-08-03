@@ -14,8 +14,11 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.mkdtemp()}/sentraops
 # app.main -> app.tasks) since it's read once at module load time.
 os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
 
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
+from kubernetes.config import ConfigException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -30,6 +33,19 @@ from app.rate_limit import limiter
 # "IP". test_rate_limiting.py flips this on for its own tests specifically
 # to prove the real 429 behavior, then restores it.
 limiter.enabled = False
+
+
+@pytest.fixture(autouse=True)
+def _no_real_kubernetes_in_tests(monkeypatch):
+    """/simulate/{scenario} tries a real BAS campaign before falling back
+    to canned data (see app/main.py) - without this, tests would silently
+    hit a REAL cluster on any dev machine whose kubeconfig happens to point
+    at one (true here: this repo's own Kind cluster). Forces the "no
+    cluster access" path everywhere by default; test_bas.py's own tests
+    override these same two targets with their own explicit mocks when
+    they specifically want to exercise the real-cluster code path."""
+    monkeypatch.setattr("app.bas.config.load_incluster_config", MagicMock(side_effect=ConfigException("disabled in tests")))
+    monkeypatch.setattr("app.bas.config.load_kube_config", MagicMock(side_effect=ConfigException("disabled in tests")))
 
 
 @pytest.fixture()

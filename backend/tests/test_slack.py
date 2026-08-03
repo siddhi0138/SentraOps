@@ -114,11 +114,13 @@ def test_slack_callback_creates_connector_instance(client, admin_headers, db_ses
         "bot_user_id": "U999",
         "incoming_webhook": {"channel": "#security", "channel_id": "C123", "url": "https://hooks.slack.com/services/T123/B123/fake"},
     }
-    with patch("app.main.exchange_code_for_token", return_value=fake_token_response):
+    with patch("app.main.exchange_code_for_token", return_value=fake_token_response), \
+         patch("app.main.provision_default_channels", return_value={}) as mock_provision:
         response = client.get("/connectors/slack/callback", params={"code": "abc", "state": state}, follow_redirects=False)
 
     assert response.status_code in (302, 307)
     assert "slack=connected" in response.headers["location"]
+    mock_provision.assert_called_once_with("xoxb-fake")
 
     instance = db_session.query(ConnectorInstance).filter(ConnectorInstance.plugin_key == "slack").one()
     assert instance.organization_id == real_org_id
@@ -127,6 +129,53 @@ def test_slack_callback_creates_connector_instance(client, admin_headers, db_ses
     assert instance.config["channel_id"] == "C123"
     assert instance.config["incoming_webhook_url"] == "https://hooks.slack.com/services/T123/B123/fake"
     assert instance.config["installed_by_user_id"] == user_id
+
+
+def test_slack_callback_reinstall_preserves_existing_channel_routing(client, admin_headers, db_session):
+    raw_token = admin_headers["Authorization"].split(" ")[1]
+    from app.auth import decode_token
+    from app.db_models import User
+
+    user_id = decode_token(raw_token, "access")
+    real_org_id = db_session.query(User).filter(User.id == user_id).one().organization_id
+
+    # Simulate an org that already has Slack connected with custom channel
+    # routing configured.
+    db_session.add(ConnectorInstance(
+        organization_id=real_org_id,
+        plugin_key="slack",
+        name="Slack (old)",
+        config={
+            "access_token": "xoxb-old",
+            "critical_channel": "critical-incidents",
+            "critical_channel_id": "C999",
+            "soc_team_channel": "soc-team",
+        },
+    ))
+    db_session.commit()
+
+    state = slack_oauth.sign_oauth_state(organization_id=real_org_id, user_id=user_id)
+    fake_token_response = {
+        "ok": True,
+        "access_token": "xoxb-new",
+        "team": {"id": "T123", "name": "Acme Corp"},
+        "bot_user_id": "U999",
+        "incoming_webhook": {"channel": "#security", "channel_id": "C123", "url": "https://hooks.slack.com/services/T123/B123/fake"},
+    }
+    with patch("app.main.exchange_code_for_token", return_value=fake_token_response), \
+         patch("app.main.provision_default_channels") as mock_provision:
+        response = client.get("/connectors/slack/callback", params={"code": "abc", "state": state}, follow_redirects=False)
+
+    assert response.status_code in (302, 307)
+    # provision_default_channels is only for brand-new installs, never a
+    # reinstall over an already-configured connector.
+    mock_provision.assert_not_called()
+
+    instance = db_session.query(ConnectorInstance).filter(ConnectorInstance.plugin_key == "slack").one()
+    assert instance.config["access_token"] == "xoxb-new"  # the fresh token is used
+    assert instance.config["critical_channel"] == "critical-incidents"  # preserved
+    assert instance.config["critical_channel_id"] == "C999"  # preserved
+    assert instance.config["soc_team_channel"] == "soc-team"  # preserved
 
 
 def test_slack_callback_redirects_with_error_on_bad_state(client):
@@ -438,6 +487,41 @@ def test_notify_agent_progress_posts_a_message(db_session, org_id):
     assert "credential theft" in posted_text.lower()
 
 
+def test_notify_agent_progress_routes_to_soc_team_channel_when_configured(db_session, org_id):
+    from app.db_models import AgentRun
+    from app.slack_bot import notify_agent_progress
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={
+            "access_token": "xoxb-fake",
+            "incoming_webhook_url": "https://hooks.slack.com/services/T123/B123/fake",
+            "soc_team_channel": "soc-team",
+        },
+    )
+    db_session.add(instance)
+    incident = Incident(organization_id=org_id, title="t", risk_level="high", risk_score=80, priority="high")
+    db_session.add(incident)
+    db_session.flush()
+    run = AgentRun(organization_id=org_id, incident_id=incident.id, status="running")
+    db_session.add(run)
+    db_session.commit()
+
+    with patch("app.slack_bot.httpx.get") as mock_get, patch("app.slack_bot.httpx.post") as mock_post:
+        mock_get.return_value.json.return_value = {"ok": True, "channels": [{"id": "C999", "name": "soc-team"}]}
+        mock_post.return_value.json.return_value = {"ok": True}
+        notify_agent_progress(db_session, run, incident, "detection", "Found credential theft pattern.")
+
+    # Goes only to the resolved soc-team channel via chat.postMessage, not
+    # also to the default incoming-webhook channel - a message type with
+    # exactly one configured home shouldn't double-post.
+    mock_post.assert_called_once()
+    assert "chat.postMessage" in mock_post.call_args.args[0]
+    assert mock_post.call_args.kwargs["json"]["channel"] == "C999"
+
+
 def test_notify_agent_progress_is_a_noop_without_connector(db_session, org_id):
     from app.db_models import AgentRun
     from app.slack_bot import notify_agent_progress
@@ -633,6 +717,75 @@ def test_resolve_channel_id_returns_none_when_not_found():
     assert channel_id is None
 
 
+def test_create_or_find_channel_creates_a_new_channel():
+    from app.slack_bot import _create_or_find_channel
+
+    with patch("app.slack_bot.httpx.post") as mock_post:
+        mock_post.return_value.json.return_value = {"ok": True, "channel": {"id": "C123", "name": "soc-team"}}
+        channel_id = _create_or_find_channel("xoxb-fake", "soc-team")
+
+    assert channel_id == "C123"
+    assert mock_post.call_args.kwargs["data"]["name"] == "soc-team"
+
+
+def test_create_or_find_channel_falls_back_to_lookup_when_name_taken():
+    from app.slack_bot import _create_or_find_channel
+
+    with patch("app.slack_bot.httpx.post") as mock_post, patch("app.slack_bot.httpx.get") as mock_get:
+        mock_post.return_value.json.return_value = {"ok": False, "error": "name_taken"}
+        mock_get.return_value.json.return_value = {"ok": True, "channels": [{"id": "C456", "name": "soc-team"}]}
+        channel_id = _create_or_find_channel("xoxb-fake", "soc-team")
+
+    assert channel_id == "C456"
+
+
+def test_create_or_find_channel_returns_none_on_other_errors():
+    from app.slack_bot import _create_or_find_channel
+
+    with patch("app.slack_bot.httpx.post") as mock_post:
+        mock_post.return_value.json.return_value = {"ok": False, "error": "missing_scope"}
+        channel_id = _create_or_find_channel("xoxb-fake", "soc-team")
+
+    assert channel_id is None
+
+
+def test_provision_default_channels_creates_all_four():
+    from app.slack_bot import provision_default_channels
+
+    created = []
+
+    def fake_post(url, **kwargs):
+        name = kwargs["data"]["name"]
+        created.append(name)
+        return _fake_json_response({"ok": True, "channel": {"id": f"C-{name}", "name": name}})
+
+    with patch("app.slack_bot.httpx.post", side_effect=fake_post):
+        config = provision_default_channels("xoxb-fake")
+
+    assert set(created) == {"critical-incidents", "soc-team", "executive-security", "compliance"}
+    assert config["critical_channel"] == "critical-incidents"
+    assert config["critical_channel_id"] == "C-critical-incidents"
+    assert config["soc_team_channel"] == "soc-team"
+    assert config["executive_channel"] == "executive-security"
+    assert config["compliance_channel"] == "compliance"
+
+
+def test_provision_default_channels_skips_ones_that_fail():
+    from app.slack_bot import provision_default_channels
+
+    def fake_post(url, **kwargs):
+        name = kwargs["data"]["name"]
+        if name == "compliance":
+            return _fake_json_response({"ok": False, "error": "missing_scope"})
+        return _fake_json_response({"ok": True, "channel": {"id": f"C-{name}", "name": name}})
+
+    with patch("app.slack_bot.httpx.post", side_effect=fake_post):
+        config = provision_default_channels("xoxb-fake")
+
+    assert "compliance_channel" not in config
+    assert config["critical_channel"] == "critical-incidents"
+
+
 def test_critical_incident_also_posts_to_configured_critical_channel(db_session, org_id):
     instance = ConnectorInstance(
         organization_id=org_id,
@@ -729,6 +882,33 @@ def test_send_daily_summaries_posts_briefing_per_connected_org(db_session, org_i
     assert "Quiet day" in posted_text
 
 
+def test_send_daily_summaries_routes_to_executive_channel_when_configured(db_session, org_id):
+    from app.slack_bot import send_daily_summaries
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={
+            "access_token": "xoxb-fake",
+            "incoming_webhook_url": "https://hooks.slack.com/services/T123/B123/fake",
+            "executive_channel": "executive-security",
+        },
+    )
+    db_session.add(instance)
+    db_session.commit()
+
+    fake_briefing = {"headline": "Quiet day", "summary": "Nothing notable."}
+    with patch("app.slack_bot.generate_briefing", return_value=fake_briefing), \
+         patch("app.slack_bot.httpx.get") as mock_get, patch("app.slack_bot.httpx.post") as mock_post:
+        mock_get.return_value.json.return_value = {"ok": True, "channels": [{"id": "C777", "name": "executive-security"}]}
+        mock_post.return_value.json.return_value = {"ok": True}
+        send_daily_summaries(db_session)
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs["json"]["channel"] == "C777"
+
+
 def test_send_daily_summaries_skips_orgs_without_connector(db_session, org_id):
     from app.slack_bot import send_daily_summaries
 
@@ -755,3 +935,402 @@ def test_send_daily_summaries_skips_org_when_ai_not_configured(db_session, org_i
         send_daily_summaries(db_session)
 
     mock_post.assert_not_called()
+
+
+# --- send_report_to_slack (Download Report -> also send to Slack) -----------
+
+
+def _fake_json_response(payload: dict):
+    class _Resp:
+        def json(self):
+            return payload
+
+        is_success = True
+        status_code = 200
+
+    return _Resp()
+
+
+def test_send_report_to_slack_is_a_noop_without_connector(db_session, org_id):
+    from app.slack_bot import send_report_to_slack
+
+    incident = Incident(organization_id=org_id, title="t", risk_level="low", risk_score=10, priority="low", report="# Report body")
+    db_session.add(incident)
+    db_session.commit()
+
+    ok, message = send_report_to_slack(db_session, incident)
+    assert ok is False
+    assert "isn't connected" in message
+
+
+def test_send_report_to_slack_uploads_real_file(db_session, org_id):
+    from app.slack_bot import send_report_to_slack
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={"access_token": "xoxb-fake", "channel_id": "C123"},
+    )
+    db_session.add(instance)
+    incident = Incident(
+        organization_id=org_id, title="Ransomware", risk_level="critical", risk_score=95, priority="critical", report="# Full incident report\n\ndetails here"
+    )
+    db_session.add(incident)
+    db_session.commit()
+
+    def fake_post(url, **kwargs):
+        if "getUploadURLExternal" in url:
+            return _fake_json_response({"ok": True, "upload_url": "https://files.slack.com/upload/abc", "file_id": "F123"})
+        if url == "https://files.slack.com/upload/abc":
+            return _fake_json_response({"ok": True})
+        if "completeUploadExternal" in url:
+            return _fake_json_response({"ok": True})
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch("app.slack_bot.httpx.post", side_effect=fake_post) as mock_post:
+        ok, message = send_report_to_slack(db_session, incident)
+
+    assert ok is True
+    assert "sent" in message.lower()
+    assert mock_post.call_count == 3
+    # step 1 sends filename/length, step 3 shares into the org's real channel
+    complete_call = mock_post.call_args_list[2]
+    assert complete_call.kwargs["json"]["channel_id"] == "C123"
+
+
+def test_send_report_to_slack_reports_upload_url_rejection():
+    from app.slack_bot import send_report_to_slack
+
+    db = None  # unused by the mocked path below
+
+    class _Incident:
+        id = 1
+        title = "t"
+        report = "body"
+        organization_id = 99
+
+    with patch("app.slack_bot.get_org_slack_connector") as mock_connector:
+        mock_connector.return_value.config = {"access_token": "xoxb-fake", "channel_id": "C123"}
+        with patch("app.slack_bot.httpx.post", return_value=_fake_json_response({"ok": False, "error": "invalid_auth"})):
+            ok, message = send_report_to_slack(db, _Incident())
+
+    assert ok is False
+    assert "invalid_auth" in message
+
+
+def test_send_incident_report_to_slack_endpoint(client, admin_headers, db_session):
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+
+    incident = Incident(organization_id=org_id, title="t", risk_level="high", risk_score=80, priority="high", report="# report")
+    db_session.add(incident)
+    db_session.commit()
+    db_session.refresh(incident)
+
+    with patch("app.main.send_report_to_slack", return_value=(True, "Report sent to Slack")) as mock_send:
+        response = client.post(f"/incidents/{incident.id}/report/send-to-slack", headers=admin_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "message": "Report sent to Slack"}
+    mock_send.assert_called_once()
+
+
+def test_send_incident_report_to_slack_endpoint_requires_authentication(client):
+    response = client.post("/incidents/1/report/send-to-slack")
+    assert response.status_code == 401
+
+
+# --- multi-channel routing (soc-team / executive / compliance) --------------
+
+
+def test_update_connector_config_invalidates_any_changed_channel_id(client, admin_headers, db_session):
+    org_id = _org_id_for(db_session, admin_headers)
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={
+            "critical_channel": "old-critical",
+            "critical_channel_id": "C1",
+            "soc_team_channel": "old-soc",
+            "soc_team_channel_id": "C2",
+            "executive_channel": "unchanged-exec",
+            "executive_channel_id": "C3",
+        },
+    )
+    db_session.add(instance)
+    db_session.commit()
+    db_session.refresh(instance)
+
+    response = client.patch(
+        f"/connectors/{instance.id}",
+        json={"config": {"critical_channel": "new-critical", "soc_team_channel": "new-soc"}},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()["config"]
+    # Changed channels lose their cached id...
+    assert "critical_channel_id" not in body
+    assert "soc_team_channel_id" not in body
+    # ...but an untouched channel's cached id survives.
+    assert body["executive_channel_id"] == "C3"
+
+
+def test_notify_compliance_report_routes_to_compliance_channel(db_session, org_id):
+    from app.slack_bot import notify_compliance_report
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={
+            "access_token": "xoxb-fake",
+            "incoming_webhook_url": "https://hooks.slack.com/services/T123/B123/fake",
+            "compliance_channel": "compliance",
+        },
+    )
+    db_session.add(instance)
+    db_session.commit()
+
+    report = {"overall_posture": "Mostly compliant", "summary": "2 controls need attention.", "gaps": [], "next_steps": ""}
+    with patch("app.slack_bot.httpx.get") as mock_get, patch("app.slack_bot.httpx.post") as mock_post:
+        mock_get.return_value.json.return_value = {"ok": True, "channels": [{"id": "C555", "name": "compliance"}]}
+        mock_post.return_value.json.return_value = {"ok": True}
+        notify_compliance_report(db_session, org_id, report)
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs["json"]["channel"] == "C555"
+    assert "Mostly compliant" in mock_post.call_args.kwargs["json"]["text"]
+
+
+def test_notify_compliance_report_falls_back_to_default_channel(db_session, org_id):
+    from app.slack_bot import notify_compliance_report
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={"incoming_webhook_url": "https://hooks.slack.com/services/T123/B123/fake"},
+    )
+    db_session.add(instance)
+    db_session.commit()
+
+    report = {"overall_posture": "Mostly compliant", "summary": "2 controls need attention."}
+    with patch("app.slack_bot.httpx.post") as mock_post:
+        notify_compliance_report(db_session, org_id, report)
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.args[0] == "https://hooks.slack.com/services/T123/B123/fake"
+
+
+def test_notify_compliance_report_is_a_noop_without_connector(db_session, org_id):
+    from app.slack_bot import notify_compliance_report
+
+    # Must not raise even with no Slack connector for this org.
+    notify_compliance_report(db_session, org_id, {"overall_posture": "x", "summary": "y"})
+
+
+def test_compliance_report_endpoint_notifies_slack(client, admin_headers, db_session):
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+
+    fake_report = {"overall_posture": "Mostly compliant", "summary": "s", "gaps": [], "next_steps": ""}
+    with patch("app.main.generate_compliance_report", return_value=fake_report), patch("app.main.notify_compliance_report") as mock_notify:
+        response = client.post("/compliance/report", headers=admin_headers)
+
+    assert response.status_code == 200
+    mock_notify.assert_called_once()
+    assert mock_notify.call_args.args[1] == org_id
+    assert mock_notify.call_args.args[2] == fake_report
+
+
+# --- assignment / status-change / comment notifications ----------------------
+
+
+def test_assigning_incident_notifies_slack(client, admin_headers, analyst_headers, db_session):
+    from tests.test_incident_workflow import _create_one_incident
+
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+
+    incident_id = _create_one_incident(client, analyst_headers)
+    users = client.get("/users", headers=admin_headers).json()
+    analyst_user_id = next(u["id"] for u in users if u["email"] == "analyst@example.com")
+
+    with patch("app.main.notify_assignment") as mock_notify:
+        response = client.patch(f"/incidents/{incident_id}", json={"assignee_id": analyst_user_id}, headers=admin_headers)
+
+    assert response.status_code == 200
+    mock_notify.assert_called_once()
+    assert mock_notify.call_args.args[2].email == "analyst@example.com"
+
+
+def test_unassigning_incident_does_not_notify_slack(client, admin_headers, analyst_headers, db_session):
+    from tests.test_incident_workflow import _create_one_incident
+
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+
+    incident_id = _create_one_incident(client, analyst_headers)
+    users = client.get("/users", headers=admin_headers).json()
+    analyst_user_id = next(u["id"] for u in users if u["email"] == "analyst@example.com")
+    client.patch(f"/incidents/{incident_id}", json={"assignee_id": analyst_user_id}, headers=admin_headers)
+
+    with patch("app.main.notify_assignment") as mock_notify:
+        response = client.patch(f"/incidents/{incident_id}", json={"assignee_id": None}, headers=admin_headers)
+
+    assert response.status_code == 200
+    mock_notify.assert_not_called()
+
+
+def test_changing_incident_status_notifies_slack(client, admin_headers, analyst_headers, db_session):
+    from tests.test_incident_workflow import _create_one_incident
+
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+    incident_id = _create_one_incident(client, analyst_headers)
+
+    with patch("app.main.notify_status_change") as mock_notify:
+        response = client.patch(f"/incidents/{incident_id}", json={"status": "closed"}, headers=admin_headers)
+
+    assert response.status_code == 200
+    mock_notify.assert_called_once()
+    assert mock_notify.call_args.args[3] == "open"
+    assert mock_notify.call_args.args[4] == "closed"
+
+
+def test_setting_status_to_same_value_does_not_notify_slack(client, admin_headers, analyst_headers, db_session):
+    from tests.test_incident_workflow import _create_one_incident
+
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+    incident_id = _create_one_incident(client, analyst_headers)
+
+    with patch("app.main.notify_status_change") as mock_notify:
+        response = client.patch(f"/incidents/{incident_id}", json={"status": "open"}, headers=admin_headers)
+
+    assert response.status_code == 200
+    mock_notify.assert_not_called()
+
+
+def test_priority_only_update_does_not_notify_status_or_assignment(client, admin_headers, analyst_headers, db_session):
+    from tests.test_incident_workflow import _create_one_incident
+
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+    incident_id = _create_one_incident(client, analyst_headers)
+
+    with patch("app.main.notify_status_change") as mock_status, patch("app.main.notify_assignment") as mock_assign:
+        response = client.patch(f"/incidents/{incident_id}", json={"priority": "low"}, headers=admin_headers)
+
+    assert response.status_code == 200
+    mock_status.assert_not_called()
+    mock_assign.assert_not_called()
+
+
+def test_commenting_on_incident_notifies_slack(client, admin_headers, analyst_headers, db_session):
+    from tests.test_incident_workflow import _create_one_incident
+
+    org_id = _org_id_for(db_session, admin_headers)
+    _install_slack_connector(db_session, org_id, 1)
+    incident_id = _create_one_incident(client, analyst_headers)
+
+    with patch("app.main.notify_comment") as mock_notify:
+        response = client.post(f"/incidents/{incident_id}/comments", json={"body": "Looks like a real threat."}, headers=analyst_headers)
+
+    assert response.status_code == 200
+    mock_notify.assert_called_once()
+    assert mock_notify.call_args.args[3] == "Looks like a real threat."
+
+
+def test_notify_assignment_posts_a_real_message(db_session, org_id):
+    from app.db_models import User
+    from app.slack_bot import notify_assignment
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={"incoming_webhook_url": "https://hooks.slack.com/services/T123/B123/fake"},
+    )
+    db_session.add(instance)
+    incident = Incident(organization_id=org_id, title="t", risk_level="high", risk_score=80, priority="high")
+    db_session.add(incident)
+    db_session.flush()
+    assignee = User(organization_id=org_id, email="priya@example.com", hashed_password="x", role="analyst")
+    db_session.add(assignee)
+    db_session.commit()
+
+    with patch("app.slack_bot.httpx.post") as mock_post:
+        notify_assignment(db_session, incident, assignee)
+
+    mock_post.assert_called_once()
+    assert "priya@example.com" in mock_post.call_args.kwargs["json"]["text"]
+
+
+def test_notify_status_change_posts_a_real_message(db_session, org_id):
+    from app.db_models import User
+    from app.slack_bot import notify_status_change
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={"incoming_webhook_url": "https://hooks.slack.com/services/T123/B123/fake"},
+    )
+    db_session.add(instance)
+    incident = Incident(organization_id=org_id, title="t", risk_level="high", risk_score=80, priority="high")
+    db_session.add(incident)
+    db_session.flush()
+    actor = User(organization_id=org_id, email="admin@example.com", hashed_password="x", role="admin")
+    db_session.add(actor)
+    db_session.commit()
+
+    with patch("app.slack_bot.httpx.post") as mock_post:
+        notify_status_change(db_session, incident, actor, "open", "closed")
+
+    mock_post.assert_called_once()
+    posted_text = mock_post.call_args.kwargs["json"]["text"]
+    assert "open" in posted_text and "closed" in posted_text
+
+
+def test_notify_comment_posts_a_real_message(db_session, org_id):
+    from app.db_models import User
+    from app.slack_bot import notify_comment
+
+    instance = ConnectorInstance(
+        organization_id=org_id,
+        plugin_key="slack",
+        name="Slack",
+        config={"incoming_webhook_url": "https://hooks.slack.com/services/T123/B123/fake"},
+    )
+    db_session.add(instance)
+    incident = Incident(organization_id=org_id, title="t", risk_level="high", risk_score=80, priority="high")
+    db_session.add(incident)
+    db_session.flush()
+    author = User(organization_id=org_id, email="priya@example.com", hashed_password="x", role="analyst")
+    db_session.add(author)
+    db_session.commit()
+
+    with patch("app.slack_bot.httpx.post") as mock_post:
+        notify_comment(db_session, incident, author, "This looks legitimate.")
+
+    mock_post.assert_called_once()
+    posted_text = mock_post.call_args.kwargs["json"]["text"]
+    assert "priya@example.com" in posted_text
+    assert "This looks legitimate." in posted_text
+
+
+def test_notify_assignment_is_a_noop_without_connector(db_session, org_id):
+    from app.db_models import User
+    from app.slack_bot import notify_assignment
+
+    incident = Incident(organization_id=org_id, title="t", risk_level="low", risk_score=10, priority="low")
+    db_session.add(incident)
+    db_session.flush()
+    assignee = User(organization_id=org_id, email="x@example.com", hashed_password="x", role="analyst")
+    db_session.add(assignee)
+    db_session.commit()
+
+    notify_assignment(db_session, incident, assignee)

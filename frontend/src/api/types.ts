@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'analyst' | 'viewer'
+export type Role = 'owner' | 'admin' | 'soc_manager' | 'analyst' | 'executive' | 'auditor'
 export type Severity = 'low' | 'medium' | 'high' | 'critical'
 export type IncidentStatus = 'open' | 'closed'
 
@@ -639,6 +639,34 @@ export interface ThreatIndicator {
   tags: string | null
   first_seen: string
   last_seen: string
+}
+
+export interface SimulateResult {
+  scenario: string
+  mode: 'real' | 'synthetic'
+  sources: Record<string, { ingested: number; skipped: number }>
+}
+
+export interface BasTechnique {
+  id: string
+  name: string
+  category: string
+  severity: Severity
+}
+
+export interface BasRunResult {
+  ran: number
+  ingested: number
+  skipped: number
+}
+
+export interface KnowledgeDocument {
+  id: number
+  title: string
+  filename: string | null
+  source: 'upload' | 'seed'
+  chunk_count: number
+  created_at: string
 }
 
 export interface AiObservabilityFeatureRow {

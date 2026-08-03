@@ -10,6 +10,7 @@ import { AITeamPage } from './pages/AITeamPage'
 import { AiObservabilityPage } from './pages/AiObservabilityPage'
 import { AssetsPage } from './pages/AssetsPage'
 import { AttackGraphPage } from './pages/AttackGraphPage'
+import { BreachSimulationPage } from './pages/BreachSimulationPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ComplianceCenterPage } from './pages/ComplianceCenterPage'
 import { DigitalTwinPage } from './pages/DigitalTwinPage'
@@ -19,6 +20,7 @@ import { ExecutiveDashboardPage } from './pages/ExecutiveDashboardPage'
 import { IncidentDetailPage } from './pages/IncidentDetailPage'
 import { IncidentsPage } from './pages/IncidentsPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
+import { KnowledgeBasePage } from './pages/KnowledgeBasePage'
 import { LearningLoopPage } from './pages/LearningLoopPage'
 import { LoginPage } from './pages/LoginPage'
 import { PredictiveThreatDetectionPage } from './pages/PredictiveThreatDetectionPage'
@@ -32,11 +34,13 @@ const INVESTIGATE_TABS = [
   { to: '/assets', label: 'Assets' },
   { to: '/attack-graph', label: 'Attack Graph' },
   { to: '/digital-twin', label: 'Digital Twin' },
+  { to: '/breach-simulation', label: 'Breach Simulation' },
 ]
 
 const AI_TEAM_TABS = [
   { to: '/ai-team', label: 'Team' },
   { to: '/ai-analyst', label: 'Analyst Chat' },
+  { to: '/knowledge-base', label: 'Knowledge Base' },
   { to: '/ai-observability', label: 'Observability' },
   { to: '/learning', label: 'Learning Loop' },
   { to: '/marketplace', label: 'Marketplace' },
@@ -76,12 +80,14 @@ export default function App() {
                 <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/attack-graph" element={<AttackGraphPage />} />
                 <Route path="/digital-twin" element={<DigitalTwinPage />} />
+                <Route path="/breach-simulation" element={<BreachSimulationPage />} />
               </Route>
               <Route path="/incidents/:id" element={<IncidentDetailPage />} />
 
               <Route element={<SectionLayout tabs={AI_TEAM_TABS} />}>
                 <Route path="/ai-team" element={<AITeamPage />} />
                 <Route path="/ai-analyst" element={<AIAnalystPage />} />
+                <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
                 <Route path="/ai-observability" element={<AiObservabilityPage />} />
                 <Route path="/learning" element={<LearningLoopPage />} />
                 <Route path="/marketplace" element={<AIMarketplacePage />} />

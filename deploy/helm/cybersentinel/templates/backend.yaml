@@ -21,6 +21,11 @@ spec:
         app.kubernetes.io/name: {{ include "cybersentinel.name" . }}
         app.kubernetes.io/component: backend
     spec:
+      # Only grants pod create/exec/delete within this namespace (see
+      # bas-rbac.yaml) - required for app/bas.py's real technique execution
+      # against a real, disposable target pod. Nothing else in the app uses
+      # the Kubernetes API.
+      serviceAccountName: {{ include "cybersentinel.fullname" . }}-backend
       containers:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
@@ -79,6 +84,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "cybersentinel.fullname" . }}-secrets
                   key: SLACK_SIGNING_SECRET
+            - name: VIRUSTOTAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cybersentinel.fullname" . }}-secrets
+                  key: VIRUSTOTAL_API_KEY
+            - name: ABUSEIPDB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cybersentinel.fullname" . }}-secrets
+                  key: ABUSEIPDB_API_KEY
           ports:
             - containerPort: 8000
           readinessProbe:

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api, ApiError } from '../api/client'
 import { StatCard } from '../components/StatCard'
+import { usePersistentState } from '../hooks/usePersistentState'
 import type { PredictiveBriefing, PredictiveSummary } from '../api/types'
 
 const DIRECTION_COLOR: Record<string, string> = {
@@ -16,7 +17,10 @@ const DIRECTION_COLOR: Record<string, string> = {
 
 export function PredictiveThreatDetectionPage() {
   const [summary, setSummary] = useState<PredictiveSummary | null>(null)
-  const [briefing, setBriefing] = useState<PredictiveBriefing | null>(null)
+  // Persisted (mirrors ExecutiveDashboardPage's already-fixed briefing) -
+  // this is a real Groq-generated result with no other source of truth, so
+  // a plain useState lost it on every refresh, forcing a re-generate.
+  const [briefing, setBriefing] = usePersistentState<PredictiveBriefing>('predictive-briefing')
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
