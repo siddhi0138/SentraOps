@@ -39,9 +39,9 @@ export function IncidentsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-foreground">Incidents</h1>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
@@ -64,7 +64,7 @@ export function IncidentsPage() {
           </select>
           <button
             onClick={() => api.downloadIncidentsCsv({ status: status || undefined, risk_level: riskLevel || undefined })}
-            className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition"
+            className="col-span-2 rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition sm:col-span-1"
           >
             Export CSV
           </button>
@@ -77,13 +77,13 @@ export function IncidentsPage() {
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground border-b border-secondary">
                 <th className="px-4 py-2 font-medium">Title</th>
-                <th className="px-4 py-2 font-medium">Confidence</th>
+                <th className="hidden px-4 py-2 font-medium md:table-cell">Confidence</th>
                 <th className="px-4 py-2 font-medium">Risk</th>
                 <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Assignee</th>
-                <th className="px-4 py-2 font-medium">Hosts</th>
-                <th className="px-4 py-2 font-medium">Events</th>
-                <th className="px-4 py-2 font-medium">Created</th>
+                <th className="hidden px-4 py-2 font-medium lg:table-cell">Assignee</th>
+                <th className="hidden px-4 py-2 font-medium lg:table-cell">Hosts</th>
+                <th className="hidden px-4 py-2 font-medium sm:table-cell">Events</th>
+                <th className="hidden px-4 py-2 font-medium md:table-cell">Created</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-secondary">
@@ -94,17 +94,17 @@ export function IncidentsPage() {
                       {incident.title}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 text-foreground">{incident.confidence}%</td>
+                  <td className="hidden px-4 py-2 text-foreground md:table-cell">{incident.confidence}%</td>
                   <td className="px-4 py-2">
                     <SeverityBadge severity={incident.risk_level} /> <span className="text-muted-foreground text-xs">{incident.risk_score}</span>
                   </td>
                   <td className="px-4 py-2">
                     <StatusBadge status={incident.status} />
                   </td>
-                  <td className="px-4 py-2 text-muted-foreground">{incident.assignee_email ?? '-'}</td>
-                  <td className="px-4 py-2 text-foreground">{incident.affected_hosts.join(', ')}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{incident.event_count}</td>
-                  <td className="px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs">{incident.created_at}</td>
+                  <td className="hidden px-4 py-2 text-muted-foreground lg:table-cell">{incident.assignee_email ?? '-'}</td>
+                  <td className="hidden px-4 py-2 text-foreground lg:table-cell">{incident.affected_hosts.join(', ')}</td>
+                  <td className="hidden px-4 py-2 text-muted-foreground sm:table-cell">{incident.event_count}</td>
+                  <td className="hidden px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs md:table-cell">{incident.created_at}</td>
                 </tr>
               ))}
               {!loading && incidents.length === 0 && (

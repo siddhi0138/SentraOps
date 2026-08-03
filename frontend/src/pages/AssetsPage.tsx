@@ -38,11 +38,11 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
         <td className="px-4 py-2">
           <SeverityBadge severity={asset.criticality} />
         </td>
-        <td className="px-4 py-2 text-foreground">{asset.department ?? '-'}</td>
-        <td className="px-4 py-2 text-foreground">{asset.owner ?? '-'}</td>
-        <td className="px-4 py-2 text-foreground">{asset.os ?? '-'}</td>
-        <td className="px-4 py-2 text-muted-foreground">{asset.event_count}</td>
-        <td className="px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs">{asset.last_seen}</td>
+        <td className="hidden px-4 py-2 text-foreground md:table-cell">{asset.department ?? '-'}</td>
+        <td className="hidden px-4 py-2 text-foreground md:table-cell">{asset.owner ?? '-'}</td>
+        <td className="hidden px-4 py-2 text-foreground lg:table-cell">{asset.os ?? '-'}</td>
+        <td className="hidden px-4 py-2 text-muted-foreground sm:table-cell">{asset.event_count}</td>
+        <td className="hidden px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs lg:table-cell">{asset.last_seen}</td>
         <td className="px-4 py-2">
           {canEdit && (
             <button onClick={() => setEditing(true)} className="text-primary hover:underline text-xs">
@@ -136,13 +136,13 @@ export function AssetsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-foreground">Assets</h1>
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search host, department, owner..."
-          className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground w-72 focus:outline-none focus:ring-2 focus:ring-primary"
+          className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 
@@ -153,11 +153,11 @@ export function AssetsPage() {
               <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground border-b border-secondary">
                 <th className="px-4 py-2 font-medium">Host</th>
                 <th className="px-4 py-2 font-medium">Criticality</th>
-                <th className="px-4 py-2 font-medium">Department</th>
-                <th className="px-4 py-2 font-medium">Owner</th>
-                <th className="px-4 py-2 font-medium">OS</th>
-                <th className="px-4 py-2 font-medium">Events</th>
-                <th className="px-4 py-2 font-medium">Last Seen</th>
+                <th className="hidden px-4 py-2 font-medium md:table-cell">Department</th>
+                <th className="hidden px-4 py-2 font-medium md:table-cell">Owner</th>
+                <th className="hidden px-4 py-2 font-medium lg:table-cell">OS</th>
+                <th className="hidden px-4 py-2 font-medium sm:table-cell">Events</th>
+                <th className="hidden px-4 py-2 font-medium lg:table-cell">Last Seen</th>
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>

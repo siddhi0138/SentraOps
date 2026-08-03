@@ -68,7 +68,7 @@ export function AiObservabilityPage() {
         {sortedFeatures.length === 0 ? (
           <p className="text-sm text-muted-foreground px-4 pb-4">No AI calls recorded yet in this process.</p>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="text-xs text-muted-foreground uppercase tracking-wide border-y border-secondary">
                 <th className="text-left font-medium px-4 py-2">Feature</th>

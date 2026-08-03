@@ -109,56 +109,60 @@ export function EventsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-foreground">Events</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search user, host, IP, message..."
-            className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground w-72 focus:outline-none focus:ring-2 focus:ring-primary"
+            className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-primary"
           />
-          <select
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value)}
-            className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-          >
-            <option value="">All severities</option>
-            {SEVERITIES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => api.downloadEventsCsv({ q: debouncedQ || undefined, severity: severity || undefined })}
-            className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition"
-          >
-            Export CSV
-          </button>
+          <div className="grid grid-cols-2 gap-2 sm:contents">
+            <select
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value)}
+              className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">All severities</option>
+              {SEVERITIES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => api.downloadEventsCsv({ q: debouncedQ || undefined, severity: severity || undefined })}
+              className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition"
+            >
+              Export CSV
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           value={nlQuestion}
           onChange={(e) => setNlQuestion(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && runNlSearch()}
           placeholder="Ask AI, e.g. 'failed logins from admin accounts today'"
-          className="flex-1 rounded-lg bg-primary/30 border border-primary px-3 py-1.5 text-sm text-foreground placeholder:text-primary/60 focus:outline-none focus:ring-2 focus:ring-primary"
+          className="rounded-lg bg-primary/30 border border-primary px-3 py-1.5 text-sm text-foreground placeholder:text-primary/60 focus:outline-none focus:ring-2 focus:ring-primary sm:flex-1"
         />
-        <button
-          onClick={() => void runNlSearch()}
-          disabled={nlLoading || !nlQuestion.trim()}
-          className="rounded-lg border border-primary hover:bg-primary/40 disabled:opacity-50 text-sm px-3 py-1.5 transition text-primary"
-        >
-          {nlLoading ? 'Thinking...' : 'Ask AI'}
-        </button>
-        {nlFilters && (
-          <button onClick={clearNlSearch} className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition">
-            Clear
+        <div className="flex gap-2">
+          <button
+            onClick={() => void runNlSearch()}
+            disabled={nlLoading || !nlQuestion.trim()}
+            className="flex-1 rounded-lg border border-primary hover:bg-primary/40 disabled:opacity-50 text-sm px-3 py-1.5 transition text-primary sm:flex-none"
+          >
+            {nlLoading ? 'Thinking...' : 'Ask AI'}
           </button>
-        )}
+          {nlFilters && (
+            <button onClick={clearNlSearch} className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition">
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {nlError && <p className="text-sm text-destructive">{nlError}</p>}
@@ -182,32 +186,32 @@ export function EventsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground border-b border-secondary">
-                <th className="px-4 py-2 font-medium">Timestamp</th>
+                <th className="hidden px-4 py-2 font-medium md:table-cell">Timestamp</th>
                 <th className="px-4 py-2 font-medium">Host</th>
-                <th className="px-4 py-2 font-medium">User</th>
-                <th className="px-4 py-2 font-medium">Source IP</th>
-                <th className="px-4 py-2 font-medium">Type</th>
+                <th className="hidden px-4 py-2 font-medium lg:table-cell">User</th>
+                <th className="hidden px-4 py-2 font-medium lg:table-cell">Source IP</th>
+                <th className="hidden px-4 py-2 font-medium sm:table-cell">Type</th>
                 <th className="px-4 py-2 font-medium">Severity</th>
-                <th className="px-4 py-2 font-medium">Message</th>
-                <th className="px-4 py-2 font-medium">Incident</th>
+                <th className="hidden px-4 py-2 font-medium md:table-cell">Message</th>
+                <th className="hidden px-4 py-2 font-medium sm:table-cell">Incident</th>
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-secondary">
               {events.map((event) => (
                 <tr key={event.id} className="hover:bg-secondary/40">
-                  <td className="px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs">{event.timestamp}</td>
+                  <td className="hidden px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs md:table-cell">{event.timestamp}</td>
                   <td className="px-4 py-2 text-foreground">{event.host}</td>
-                  <td className="px-4 py-2 text-foreground">{event.username ?? '-'}</td>
-                  <td className="px-4 py-2 text-muted-foreground font-mono text-xs">{event.source_ip ?? '-'}</td>
-                  <td className="px-4 py-2 text-foreground">{event.event_type}</td>
+                  <td className="hidden px-4 py-2 text-foreground lg:table-cell">{event.username ?? '-'}</td>
+                  <td className="hidden px-4 py-2 text-muted-foreground font-mono text-xs lg:table-cell">{event.source_ip ?? '-'}</td>
+                  <td className="hidden px-4 py-2 text-foreground sm:table-cell">{event.event_type}</td>
                   <td className="px-4 py-2">
                     <SeverityBadge severity={event.severity} />
                   </td>
-                  <td className="px-4 py-2 text-foreground max-w-md truncate" title={event.message}>
+                  <td className="hidden px-4 py-2 text-foreground max-w-md truncate md:table-cell" title={event.message}>
                     {event.message}
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="hidden px-4 py-2 sm:table-cell">
                     {event.incident_id ? (
                       <Link to={`/incidents/${event.incident_id}`} className="text-primary hover:underline">
                         #{event.incident_id}

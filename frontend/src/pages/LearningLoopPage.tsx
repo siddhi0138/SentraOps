@@ -124,33 +124,35 @@ export function LearningLoopPage() {
 
           <div>
             <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Duration & Confidence by Outcome</h3>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground border-b border-secondary">
-                  <th className="text-left font-medium py-1.5">Rating</th>
-                  <th className="text-right font-medium py-1.5">Rated</th>
-                  <th className="text-right font-medium py-1.5">Avg Duration</th>
-                  <th className="text-right font-medium py-1.5">Avg Detection Confidence</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-secondary">
-                {(['accurate', 'false_positive', 'missed_detection'] as const).map((rating) => {
-                  const bucket = evaluation.accuracy_correlation[rating]
-                  return (
-                    <tr key={rating}>
-                      <td className="py-1.5 text-foreground">{RATING_LABELS[rating]}</td>
-                      <td className="py-1.5 text-right text-muted-foreground">{bucket.rated_investigations}</td>
-                      <td className="py-1.5 text-right text-muted-foreground">
-                        {bucket.avg_duration_seconds !== null ? `${bucket.avg_duration_seconds}s` : '—'}
-                      </td>
-                      <td className="py-1.5 text-right text-muted-foreground">
-                        {bucket.avg_detection_confidence !== null ? `${bucket.avg_detection_confidence}%` : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[480px] text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground border-b border-secondary">
+                    <th className="text-left font-medium py-1.5">Rating</th>
+                    <th className="text-right font-medium py-1.5">Rated</th>
+                    <th className="text-right font-medium py-1.5">Avg Duration</th>
+                    <th className="text-right font-medium py-1.5">Avg Detection Confidence</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-secondary">
+                  {(['accurate', 'false_positive', 'missed_detection'] as const).map((rating) => {
+                    const bucket = evaluation.accuracy_correlation[rating]
+                    return (
+                      <tr key={rating}>
+                        <td className="py-1.5 text-foreground">{RATING_LABELS[rating]}</td>
+                        <td className="py-1.5 text-right text-muted-foreground">{bucket.rated_investigations}</td>
+                        <td className="py-1.5 text-right text-muted-foreground">
+                          {bucket.avg_duration_seconds !== null ? `${bucket.avg_duration_seconds}s` : '—'}
+                        </td>
+                        <td className="py-1.5 text-right text-muted-foreground">
+                          {bucket.avg_detection_confidence !== null ? `${bucket.avg_detection_confidence}%` : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

@@ -192,14 +192,14 @@ export function IncidentDetailPage() {
       )}
 
       <div className="panel p-5 space-y-4">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold text-foreground">{incident.title}</h1>
             <p className="text-sm text-muted-foreground mt-1">
               Created {incident.created_at} &middot; {incident.event_count} events
             </p>
           </div>
-          <div className="flex gap-2 shrink-0">
+          <div className="flex flex-wrap gap-2 sm:shrink-0">
             <button
               onClick={() => void handleDownloadReport()}
               className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition"

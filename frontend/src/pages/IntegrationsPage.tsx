@@ -139,22 +139,24 @@ function ChannelField({ connector, onSaved, roleKey, label, placeholder }: {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground shrink-0 w-64">{label}:</span>
-      <input
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        className="w-40 rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
-      />
-      <button
-        onClick={() => void save()}
-        disabled={saving}
-        className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-xs px-2.5 py-1 text-foreground transition"
-      >
-        {saving ? 'Saving...' : 'Save'}
-      </button>
-      {connector.config[roleKey] && <span className="text-xs text-muted-foreground">currently: #{connector.config[roleKey]}</span>}
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <span className="text-xs text-muted-foreground sm:shrink-0 sm:w-64">{label}:</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="w-40 rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
+        />
+        <button
+          onClick={() => void save()}
+          disabled={saving}
+          className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-xs px-2.5 py-1 text-foreground transition"
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        {connector.config[roleKey] && <span className="text-xs text-muted-foreground">currently: #{connector.config[roleKey]}</span>}
+      </div>
     </div>
   )
 }
