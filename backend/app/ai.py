@@ -67,15 +67,31 @@ def answer_question(question: str, evidence: list[dict]) -> str:
     return response.choices[0].message.content
 
 
-EXPLAIN_SYSTEM_PROMPT = """You are CyberSentinel AI, a security analyst assistant. \
-Given an incident's report (timeline, alerts, threat intel, risk factors), \
-produce a structured explanation of it.
+_EXPLAIN_TONE_BY_AUDIENCE = {
+    "analyst": (
+        "Write for a security analyst colleague: technical and precise, citing "
+        "specific evidence (hosts, accounts, IPs, timestamps, event types)."
+    ),
+    "executive": (
+        "Write for a non-technical business executive: plain language, no jargon "
+        "(avoid event IDs, protocol names, or technical terms) - focus on business "
+        "risk, what happened in everyday terms, and what it means for the company."
+    ),
+}
+
+
+def _explain_system_prompt(audience: str) -> str:
+    tone = _EXPLAIN_TONE_BY_AUDIENCE.get(audience, _EXPLAIN_TONE_BY_AUDIENCE["analyst"])
+    return f"""You are CyberSentinel AI, a security analyst assistant. Given an \
+incident's report (timeline, alerts, threat intel, risk factors), produce a \
+structured explanation of it.
+
+{tone}
 
 Respond with ONLY a JSON object (no markdown fences, no extra text) with \
 exactly these string keys:
 - "explanation": 2-4 sentences explaining WHY this incident has the risk \
-level it does, referencing specific evidence (accounts, IPs, hosts, timing). \
-Written for a human, not a severity label.
+level it does. Written for a human, not a severity label.
 - "timeline_narrative": one prose paragraph (not a list) narrating how the \
 attack progressed from start to finish, the way an analyst would tell the \
 story to a colleague.
@@ -103,7 +119,7 @@ def _fallback_explanation(raw_text: str) -> dict:
     }
 
 
-def explain_incident(report: str, confidence: int) -> dict:
+def explain_incident(report: str, confidence: int, audience: str = "analyst") -> dict:
     client = _get_client()
     model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
 
@@ -111,7 +127,7 @@ def explain_incident(report: str, confidence: int) -> dict:
         response = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": EXPLAIN_SYSTEM_PROMPT},
+                {"role": "system", "content": _explain_system_prompt(audience)},
                 {"role": "user", "content": f"Incident report:\n{report}"},
             ],
             temperature=0.2,
@@ -132,3 +148,148 @@ def explain_incident(report: str, confidence: int) -> dict:
     # the rest of the app already shows for this incident.
     parsed["confidence"] = confidence
     return parsed
+
+
+_EXPLAIN_EVENT_SYSTEM_PROMPT = """You are CyberSentinel AI, a security analyst assistant. Given a \
+single raw security event/log line from a SOC platform, explain it to an analyst \
+who is scanning a large events table and needs to quickly decide whether it's worth \
+investigating.
+
+Respond with ONLY a JSON object (no markdown fences, no extra text) with exactly \
+these string keys:
+- "explanation": 1-3 sentences in plain language explaining what this event means \
+and why it has the severity it does.
+- "is_suspicious": either "true" or "false" (as a string) - your own judgment of \
+whether this single event, in isolation, looks like it could be malicious or \
+anomalous activity worth an analyst's attention, as opposed to routine/benign \
+activity.
+- "recommended_action": one short, concrete next step an analyst could take \
+(e.g. "Check other events from this host in the last hour" or "No action needed - \
+routine activity").
+
+Base everything strictly on the event given - do not invent details not present \
+in it."""
+
+
+def _fallback_event_explanation(raw_text: str) -> dict:
+    return {
+        "explanation": raw_text,
+        "is_suspicious": "false",
+        "recommended_action": "",
+    }
+
+
+def explain_event(event_text: str) -> dict:
+    client = _get_client()
+    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _EXPLAIN_EVENT_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Event:\n{event_text}"},
+            ],
+            temperature=0.2,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+        )
+    except GroqError as exc:
+        raise ChatProviderError(str(exc)) from exc
+
+    raw = response.choices[0].message.content
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = _fallback_event_explanation(raw)
+
+    parsed["is_suspicious"] = str(parsed.get("is_suspicious", "false")).lower() == "true"
+    return parsed
+
+
+# Known event_type values produced by the parsers - used to ground the LLM's
+# output so it maps natural language onto values the /events filter can
+# actually match with an exact "==" comparison, instead of hallucinating one.
+KNOWN_EVENT_TYPES = (
+    "login_success",
+    "login_failed",
+    "privilege_escalation",
+    "process_execution",
+    "windows_event",
+    "syslog_event",
+    "http_error",
+    "http_not_found",
+    "http_request",
+    "auth_failed",
+    "firewall_deny",
+    "firewall_allow",
+)
+KNOWN_SEVERITIES = ("low", "medium", "high", "critical")
+
+_QUERY_SYSTEM_PROMPT = f"""You are CyberSentinel AI, a security analyst assistant. Translate the \
+analyst's natural-language question into a STRUCTURED search filter for this \
+platform's events table. You are NOT generating SQL, KQL, or any query \
+language - only picking values for a fixed set of filter fields.
+
+Respond with ONLY a JSON object (no markdown fences, no extra text) with \
+exactly these keys, using null for any field the question doesn't specify:
+- "event_type": one of {list(KNOWN_EVENT_TYPES)}, or null
+- "severity": one of {list(KNOWN_SEVERITIES)}, or null
+- "username": a specific account name mentioned, or null
+- "host": a specific hostname mentioned, or null
+- "source_ip": a specific IP address mentioned, or null
+- "q": a short free-text keyword to match against usernames/hosts/IPs/\
+messages/event types, for anything not captured by the fields above (e.g. a \
+tool name, keyword, or vague topic), or null
+
+Only set fields you're confident about from the question. Do not invent \
+hosts, usernames, or IPs that aren't mentioned."""
+
+
+def _clean_query_filters(parsed: dict) -> dict:
+    event_type = parsed.get("event_type")
+    if event_type not in KNOWN_EVENT_TYPES:
+        event_type = None
+
+    severity = parsed.get("severity")
+    if severity not in KNOWN_SEVERITIES:
+        severity = None
+
+    def _clean_str(value) -> str | None:
+        return value if isinstance(value, str) and value.strip() else None
+
+    return {
+        "event_type": event_type,
+        "severity": severity,
+        "username": _clean_str(parsed.get("username")),
+        "host": _clean_str(parsed.get("host")),
+        "source_ip": _clean_str(parsed.get("source_ip")),
+        "q": _clean_str(parsed.get("q")),
+    }
+
+
+def translate_query(question: str) -> dict:
+    client = _get_client()
+    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _QUERY_SYSTEM_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            temperature=0,
+            max_tokens=200,
+            response_format={"type": "json_object"},
+        )
+    except GroqError as exc:
+        raise ChatProviderError(str(exc)) from exc
+
+    raw = response.choices[0].message.content
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = {}
+
+    return _clean_query_filters(parsed)

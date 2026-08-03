@@ -31,7 +31,7 @@ from app.auth import (
 from app.correlation import run_correlation
 from app.db import get_db, init_db
 from app.db_models import Asset, Event, Incident, IncidentComment, Notification, User
-from app.ai import ChatConfigError, ChatProviderError, answer_question, explain_incident
+from app.ai import ChatConfigError, ChatProviderError, answer_question, explain_event, explain_incident, translate_query
 from app.ingestion import ingest
 from app.rag import search as rag_search
 from app.simulate import get_scenario
@@ -296,6 +296,36 @@ def export_events_csv(
     )
 
 
+@app.get("/events/{event_id}/explain")
+def explain_event_endpoint(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    """AI-generated plain-language explanation of a single raw event - one
+    Groq call, not persisted (regenerated on request)."""
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    event_text = (
+        f"timestamp: {event.timestamp.isoformat() if event.timestamp else 'unknown'}\n"
+        f"host: {event.host}\n"
+        f"username: {event.username or 'unknown'}\n"
+        f"source_ip: {event.source_ip or 'unknown'}\n"
+        f"event_type: {event.event_type}\n"
+        f"severity: {event.severity}\n"
+        f"source_type: {event.source_type}\n"
+        f"message: {event.message}"
+    )
+    try:
+        return explain_event(event_text)
+    except ChatConfigError:
+        raise HTTPException(status_code=503, detail="AI chat isn't configured - set GROQ_API_KEY")
+    except ChatProviderError as exc:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
+
+
 @app.post("/correlate")
 def correlate(
     db: Session = Depends(get_db),
@@ -386,22 +416,51 @@ def download_incident_report(
 @app.get("/incidents/{incident_id}/explain")
 def explain_incident_endpoint(
     incident_id: int,
+    audience: Literal["analyst", "executive"] = "analyst",
     db: Session = Depends(get_db),
     _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
 ) -> dict:
     """AI-generated explanation, timeline narrative, and structured summary
     for one incident - one Groq call, not persisted (regenerated on
-    request), so this reflects the incident's current report every time."""
+    request), so this reflects the incident's current report every time.
+    `audience=executive` swaps the tone for a non-technical reader."""
     incident = db.get(Incident, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
     try:
-        return explain_incident(incident.report, incident.confidence)
+        return explain_incident(incident.report, incident.confidence, audience=audience)
     except ChatConfigError:
         raise HTTPException(status_code=503, detail="AI chat isn't configured - set GROQ_API_KEY")
     except ChatProviderError as exc:
         raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
+
+
+@app.get("/incidents/{incident_id}/similar")
+def similar_incidents(
+    incident_id: int,
+    k: int = 5,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    """Reuses the incident's own report as a semantic search query against
+    every other incident's already-stored embedding - no Groq call, just
+    the same local/free embedding model. Excludes itself from the results
+    (it's always its own closest match)."""
+    incident = db.get(Incident, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    raw_results = rag_search(db, incident.report, content_type="incident", k=k + 1)
+    matches = []
+    for result in raw_results:
+        if result["content_id"] == incident_id or len(matches) >= k:
+            continue
+        other = db.get(Incident, result["content_id"])
+        if other:
+            matches.append({**other.to_summary_dict(), "similarity": result["score"]})
+
+    return {"incident_id": incident_id, "matches": matches}
 
 
 class IncidentUpdate(BaseModel):
@@ -623,6 +682,53 @@ def chat(
         raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
 
     return {"question": payload.question, "answer": answer, "sources": evidence}
+
+
+class QueryRequest(BaseModel):
+    question: str
+    limit: int = 50
+    offset: int = 0
+
+
+@app.post("/query")
+def natural_language_query(
+    payload: QueryRequest,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    """Translates a natural-language question into the SAME structured filter
+    fields /events already accepts (event_type, severity, username, host,
+    source_ip, q) - the LLM only ever picks values for a fixed set of known
+    fields, it never generates SQL/KQL/any query language, so there's no
+    injection surface here regardless of what the question contains."""
+    if not payload.question.strip():
+        raise HTTPException(status_code=422, detail="question cannot be empty")
+
+    try:
+        filters = translate_query(payload.question)
+    except ChatConfigError:
+        raise HTTPException(status_code=503, detail="AI chat isn't configured - set GROQ_API_KEY")
+    except ChatProviderError as exc:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
+
+    query = _filter_events(
+        db,
+        filters["q"],
+        filters["event_type"],
+        filters["severity"],
+        filters["username"],
+        filters["host"],
+        filters["source_ip"],
+    )
+    total = query.count()
+    events = query.order_by(Event.timestamp.desc()).offset(payload.offset).limit(min(payload.limit, 500)).all()
+
+    return {
+        "question": payload.question,
+        "filters": filters,
+        "total": total,
+        "events": [e.to_dict() for e in events],
+    }
 
 
 @app.get("/notifications")
