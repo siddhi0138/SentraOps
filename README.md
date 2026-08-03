@@ -7,7 +7,7 @@ solid SOC platform first, AI reasoning layered on top of it later.
 
 ```
 Milestone 1: CyberSentinel Core       - Foundation SOC (no AI)          [DONE]
-Milestone 2: AI Security Analyst      - LLM reasoning over the platform
+Milestone 2: AI Security Analyst      - LLM reasoning over the platform  [IN PROGRESS]
 Milestone 3: Autonomous AI Security Team - Multi-agent investigation
 Milestone 4: Enterprise SOC Platform  - Streaming, graph, RBAC, deployment
 ```
@@ -20,7 +20,7 @@ Built in dependency order, since each layer needed the one before it:
 - [x] Step 2 — Auth + RBAC
 - [x] Step 3 — Correlation engine
 - [x] Step 4 — React dashboard + investigation page
-- [x] **Step 5 — Assets, search, incident workflow, notifications, reports** (this step)
+- [x] Step 5 — Assets, search, incident workflow, notifications, reports
 
 ### Database migrations
 
@@ -203,6 +203,53 @@ Set `JWT_SECRET_KEY` to a real secret in any non-local environment (see
 `.env.example` for how to generate one) — the default is dev-only and
 publicly known.
 
+## Milestone 2: AI Security Analyst — in progress
+
+One AI analyst (not a multi-agent swarm — that's Milestone 3), grounded in
+this platform's own data via RAG instead of hallucinating.
+
+**LLM: Groq** (free tier — `llama-3.3-70b-versatile` by default, override via
+`GROQ_MODEL`), not the GPT-5.x/Gemini the original spec named — swapped for
+cost. **Embeddings: local, not an API** — `sentence-transformers`
+(`all-MiniLM-L6-v2`, 384-dim) runs on CPU, free, no key needed; only the
+final answer-generation step calls Groq. **Vector store: pgvector**, not a
+separate Qdrant container — one less service to run, lives in the Postgres
+you already have.
+
+- [x] **Step 1 — pgvector + local embeddings pipeline.** Every ingested
+  event and every correlated incident gets embedded automatically
+  (`app/embeddings.py`, `app/rag.py`). Dialect-aware: real indexed
+  `cosine_distance()` search on Postgres, brute-force Python cosine
+  similarity on SQLite (dev only, not meant to scale). Requires a real
+  Postgres container to test properly — the SQLite fallback path can't
+  catch bugs in the pgvector-specific code (and didn't: see below).
+- [x] **Step 2 — RAG retrieval endpoint** (`GET /rag/search?q=&content_type=`)
+  — semantic search over that index, no LLM call yet. This is the
+  retrieval half of RAG; the chat endpoint (next) is retrieval + generation.
+- [ ] Step 3 — AI chat endpoint + page (the actual "ask a question, get a
+  grounded answer with sources" loop)
+- [ ] Step 4 — Incident explanation, timeline narration, threat summary
+- [ ] Step 5 — Log explanation, NL→query generator, similar-incident
+  search, threat knowledge Q&A, executive/analyst report modes,
+  confidence/explainability display
+
+**Setup:** get a free key at console.groq.com → API Keys, then set
+`GROQ_API_KEY` in `.env` (repo root, for Docker) and `backend/.env` (for
+local `uvicorn`, loaded via `python-dotenv`) — see `.env.example`. Postgres
+must be the `pgvector/pgvector:pg16` image (already the default in
+`docker-compose.yml`); a plain `postgres` image doesn't have the
+`vector` extension available for the migration to enable.
+
+**Real bug this step caught:** `Embedding.vector.cosine_distance(...)`
+raised `AttributeError` the first time it ran against real Postgres,
+because wrapping `pgvector.sqlalchemy.Vector` in a `TypeDecorator` (needed
+for the SQLite fallback) doesn't automatically forward the wrapped type's
+special comparator methods — needs `comparator_factory = Vector.comparator_factory`
+set explicitly. All prior testing had only exercised the SQLite path, which
+never calls that method at all. Lesson: dialect-specific code needs a
+dialect-specific test, full stop — a passing SQLite test proves nothing
+about the Postgres path when the two paths use genuinely different code.
+
 ## Run it
 
 ### Option A — Docker Compose (Postgres + Redis + backend + frontend)
@@ -258,13 +305,16 @@ npm run build   # typechecks (tsc) + bundles
 backend/
   app/
     parsers/        # per-source-format normalizers + registry
-    db.py           # SQLAlchemy engine/session (Postgres or SQLite)
-    db_models.py    # RawLog, Event, User, Incident, IncidentComment, Asset, Notification tables
+    db.py           # SQLAlchemy engine/session (Postgres or SQLite), .env loading
+    db_models.py    # RawLog, Event, User, Incident, IncidentComment, Asset, Notification, Embedding tables
     auth.py         # password hashing, JWT, RBAC dependencies
-    ingestion.py    # parse + persist raw logs, upsert asset inventory
-    correlation.py  # cluster events into incidents, score risk, recommend actions, notify
+    ingestion.py    # parse + persist raw logs, upsert asset inventory, embed events
+    correlation.py  # cluster events into incidents, score risk, recommend actions, notify, embed incidents
+    embeddings.py   # local sentence-transformers wrapper (free, no API key)
+    rag.py          # store/search embeddings (pgvector on Postgres, brute-force on SQLite)
     simulate.py     # synthetic attack scenarios for demoing without real infra
     main.py         # FastAPI app
+  alembic/          # migrations - see "Database migrations" above
   data/
     samples/        # one raw-format fixture per source type
   tests/
@@ -279,5 +329,6 @@ docker-compose.yml
 
 ## Tech stack
 
-Backend: FastAPI, SQLAlchemy, Postgres, Redis (wired up, not yet used), Docker.
+Backend: FastAPI, SQLAlchemy, Alembic, Postgres + pgvector, Redis (wired up, not yet used), Docker.
+AI: Groq (`llama-3.3-70b-versatile`, free tier) for generation, local `sentence-transformers` for embeddings — no paid API required for any of it.
 Frontend: React, TypeScript, Tailwind CSS v4, React Router, Recharts, Vite, nginx (prod image).

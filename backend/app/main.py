@@ -32,6 +32,7 @@ from app.correlation import run_correlation
 from app.db import get_db, init_db
 from app.db_models import Asset, Event, Incident, IncidentComment, Notification, User
 from app.ingestion import ingest
+from app.rag import search as rag_search
 from app.simulate import get_scenario
 
 
@@ -557,6 +558,21 @@ def search(
         "incidents": [i.to_summary_dict() for i in incidents],
         "assets": [a.to_dict() for a in assets],
     }
+
+
+@app.get("/rag/search")
+def semantic_search(
+    q: str = Query(..., min_length=1),
+    content_type: Literal["event", "incident"] | None = None,
+    k: int = 5,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    """Meaning-based search (embeddings + cosine similarity), unlike
+    /search above which is a plain SQL ILIKE substring match. This is the
+    retrieval half of RAG - no LLM call here, just ranked evidence. Milestone
+    2's chat endpoint will call this same function to ground its answers."""
+    return {"query": q, "results": rag_search(db, q, content_type=content_type, k=min(k, 20))}
 
 
 @app.get("/notifications")
