@@ -1,0 +1,106 @@
+"""add playbook_templates and org_playbook_installs tables
+
+Revision ID: 561f3276487c
+Revises: 01fab62b24ce
+Create Date: 2026-07-27 03:37:49.262003
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = '561f3276487c'
+down_revision: Union[str, Sequence[str], None] = '01fab62b24ce'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+playbook_templates = sa.table(
+    "playbook_templates",
+    sa.column("key", sa.String),
+    sa.column("name", sa.String),
+    sa.column("description", sa.Text),
+    sa.column("category", sa.String),
+    sa.column("prompt_addition", sa.Text),
+)
+
+SEED_PLAYBOOKS = [
+    {
+        "key": "ransomware_response",
+        "name": "Ransomware Response Playbook",
+        "description": "Emphasizes containment, offline-backup verification, and recovery timeline in incident explanations.",
+        "category": "threat-type",
+        "prompt_addition": "This organization has enabled the Ransomware Response Playbook: when explaining an incident that looks like ransomware or data exfiltration, explicitly address whether offline/immutable backups should be verified before any remediation, and estimate a realistic recovery timeline.",
+    },
+    {
+        "key": "insider_threat",
+        "name": "Insider Threat Playbook",
+        "description": "Emphasizes behavioral/access-pattern analysis and recommends HR/legal involvement where relevant.",
+        "category": "threat-type",
+        "prompt_addition": "This organization has enabled the Insider Threat Playbook: when the evidence suggests an authorized user misusing legitimate access, explicitly call out the behavioral/access-pattern anomaly and note that HR/legal involvement may be warranted alongside technical remediation.",
+    },
+    {
+        "key": "pci_dss_focus",
+        "name": "PCI-DSS Focused Reporting",
+        "description": "Frames incident explanations around cardholder-data exposure risk, for payment-card environments.",
+        "category": "compliance",
+        "prompt_addition": "This organization has enabled PCI-DSS Focused Reporting: explicitly assess whether cardholder data may have been exposed or accessed, and note this is relevant to PCI-DSS breach-notification obligations if so.",
+    },
+    {
+        "key": "hipaa_focus",
+        "name": "HIPAA Focused Reporting (Healthcare)",
+        "description": "Frames incident explanations around protected health information (PHI) exposure risk.",
+        "category": "compliance",
+        "prompt_addition": "This organization has enabled HIPAA Focused Reporting: explicitly assess whether protected health information (PHI) may have been exposed or accessed, and note this is relevant to HIPAA breach-notification obligations if so.",
+    },
+    {
+        "key": "board_brief",
+        "name": "Executive Board Brief",
+        "description": "Ultra-concise, board-level tone - 3 sentences maximum, no technical detail at all.",
+        "category": "reporting-style",
+        "prompt_addition": "This organization has enabled the Executive Board Brief style: keep the explanation to 3 sentences maximum, avoid any technical detail whatsoever, and focus purely on business risk and the decision the board needs to make.",
+    },
+]
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    op.create_table('playbook_templates',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('key', sa.String(length=50), nullable=False),
+    sa.Column('name', sa.String(length=255), nullable=False),
+    sa.Column('description', sa.Text(), nullable=False),
+    sa.Column('category', sa.String(length=50), nullable=False),
+    sa.Column('prompt_addition', sa.Text(), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('key')
+    )
+    op.create_index(op.f('ix_playbook_templates_category'), 'playbook_templates', ['category'], unique=False)
+    op.create_table('org_playbook_installs',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('organization_id', sa.Integer(), nullable=False),
+    sa.Column('playbook_id', sa.Integer(), nullable=False),
+    sa.Column('installed_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], ),
+    sa.ForeignKeyConstraint(['playbook_id'], ['playbook_templates.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('ix_org_playbook_installs_org_playbook', 'org_playbook_installs', ['organization_id', 'playbook_id'], unique=True)
+    op.create_index(op.f('ix_org_playbook_installs_organization_id'), 'org_playbook_installs', ['organization_id'], unique=False)
+    op.create_index(op.f('ix_org_playbook_installs_playbook_id'), 'org_playbook_installs', ['playbook_id'], unique=False)
+
+    op.bulk_insert(playbook_templates, SEED_PLAYBOOKS)
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_org_playbook_installs_playbook_id'), table_name='org_playbook_installs')
+    op.drop_index(op.f('ix_org_playbook_installs_organization_id'), table_name='org_playbook_installs')
+    op.drop_index('ix_org_playbook_installs_org_playbook', table_name='org_playbook_installs')
+    op.drop_table('org_playbook_installs')
+    op.drop_index(op.f('ix_playbook_templates_category'), table_name='playbook_templates')
+    op.drop_table('playbook_templates')
+    # ### end Alembic commands ###
