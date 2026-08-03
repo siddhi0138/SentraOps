@@ -585,7 +585,7 @@ def simulate(
         raise HTTPException(status_code=400, detail=str(exc))
 
     try:
-        bas_events = bas.run_campaign(user.organization_id, list(bas.TECHNIQUES))
+        bas_events = bas.run_campaign(user.organization_id, bas.pick_random_campaign())
         events, skipped = ingest(db, user.organization_id, "bas", bas_events)
         return {"scenario": scenario, "mode": "real", "sources": {"bas": {"ingested": len(events), "skipped": skipped}}}
     except Exception:

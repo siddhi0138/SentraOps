@@ -22,6 +22,34 @@ def test_run_technique_rejects_unknown_id():
         bas.run_technique(1, "T9999")
 
 
+def test_techniques_catalog_has_more_than_one_category():
+    # The whole point of pick_random_campaign() is variety - if everything
+    # were "discovery" there'd be nothing else to sample from.
+    categories = {t["category"] for t in bas.TECHNIQUES.values()}
+    assert len(categories) >= 4
+
+
+def test_pick_random_campaign_includes_discovery_and_other_techniques():
+    campaign = bas.pick_random_campaign()
+    categories = {bas.TECHNIQUES[tid]["category"] for tid in campaign}
+    assert "discovery" in categories
+    assert len(categories) >= 2  # at least one non-discovery technique too
+    assert len(campaign) == len(set(campaign))  # no duplicates
+
+
+def test_pick_random_campaign_varies_across_calls():
+    # Not a strict guarantee (a truly unlucky RNG could repeat), but with
+    # this many techniques to sample from, 20 calls all matching would mean
+    # the randomization isn't actually random.
+    campaigns = {tuple(sorted(bas.pick_random_campaign())) for _ in range(20)}
+    assert len(campaigns) > 1
+
+
+def test_pick_random_campaign_only_returns_known_technique_ids():
+    campaign = bas.pick_random_campaign()
+    assert all(tid in bas.TECHNIQUES for tid in campaign)
+
+
 def test_load_k8s_config_raises_not_configured_when_no_cluster_access():
     with patch("app.bas.config.load_incluster_config", side_effect=ConfigException("no in-cluster config")):
         with patch("app.bas.config.load_kube_config", side_effect=ConfigException("no kubeconfig")):
