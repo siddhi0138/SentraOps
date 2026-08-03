@@ -14,7 +14,7 @@ interface StatCardProps {
 // hand-invented shape - adapted to this app's own severity/accent colors.
 export function StatCard({ label, value, accent, icon: Icon }: StatCardProps) {
   return (
-    <Card className="bg-gradient-to-t from-primary/5 to-card shadow-xs">
+    <Card className="panel bg-gradient-to-t from-primary/10 to-transparent shadow-xs transition-shadow hover:glow-primary">
       <CardHeader>
         <CardDescription className="font-mono text-[10.5px] uppercase tracking-widest">{label}</CardDescription>
         <CardTitle className={cn('text-2xl font-semibold tabular-nums @[250px]/card:text-3xl', accent ?? 'text-foreground')}>

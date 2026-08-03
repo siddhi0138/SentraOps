@@ -1,5 +1,6 @@
-import { Navigate, Route, HashRouter, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
+import { ThemeProvider } from './theme/ThemeContext'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { SectionLayout } from './components/SectionLayout'
@@ -58,7 +59,8 @@ const SETTINGS_TABS = [
 
 export default function App() {
   return (
-    <HashRouter>
+    <BrowserRouter>
+      <ThemeProvider>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -104,6 +106,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
-    </HashRouter>
+      </ThemeProvider>
+    </BrowserRouter>
   )
 }

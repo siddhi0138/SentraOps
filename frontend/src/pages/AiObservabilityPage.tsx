@@ -31,7 +31,7 @@ export function AiObservabilityPage() {
   }, [load])
 
   if (loading || !summary) {
-    return <div className="text-slate-400">Loading AI observability...</div>
+    return <div className="text-muted-foreground">Loading AI observability...</div>
   }
 
   const sortedFeatures = [...summary.features].sort((a, b) => b.calls_success + b.calls_error - (a.calls_success + a.calls_error))
@@ -40,21 +40,21 @@ export function AiObservabilityPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-lg font-semibold text-slate-100">AI Observability</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-lg font-semibold text-foreground">AI Observability</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             Real usage, latency, and estimated cost for every Groq call this platform makes - agents, chat,
             explanations, and briefings alike - read live off this process's own metrics.
           </p>
         </div>
         <button
           onClick={() => void load()}
-          className="rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 transition"
+          className="rounded-lg bg-border hover:bg-muted-foreground text-white text-sm font-medium px-4 py-2 transition"
         >
           Refresh
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Calls" value={summary.totals.calls} />
@@ -63,14 +63,14 @@ export function AiObservabilityPage() {
         <StatCard label="Completion Tokens" value={summary.totals.completion_tokens.toLocaleString()} />
       </div>
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-x-auto">
-        <h2 className="text-sm font-medium text-slate-300 p-4 pb-2">By Feature</h2>
+      <div className="panel overflow-x-auto">
+        <h2 className="text-sm font-medium text-foreground p-4 pb-2">By Feature</h2>
         {sortedFeatures.length === 0 ? (
-          <p className="text-sm text-slate-500 px-4 pb-4">No AI calls recorded yet in this process.</p>
+          <p className="text-sm text-muted-foreground px-4 pb-4">No AI calls recorded yet in this process.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-xs text-slate-500 uppercase tracking-wide border-y border-slate-800">
+              <tr className="text-xs text-muted-foreground uppercase tracking-wide border-y border-secondary">
                 <th className="text-left font-medium px-4 py-2">Feature</th>
                 <th className="text-right font-medium px-4 py-2">Calls</th>
                 <th className="text-right font-medium px-4 py-2">Success Rate</th>
@@ -79,31 +79,31 @@ export function AiObservabilityPage() {
                 <th className="text-right font-medium px-4 py-2">Est. Cost</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-secondary">
               {sortedFeatures.map((row) => (
                 <tr key={row.feature}>
-                  <td className="px-4 py-2.5 text-slate-100">{row.feature}</td>
-                  <td className="px-4 py-2.5 text-right text-slate-300">{row.calls_success + row.calls_error}</td>
+                  <td className="px-4 py-2.5 text-foreground">{row.feature}</td>
+                  <td className="px-4 py-2.5 text-right text-foreground">{row.calls_success + row.calls_error}</td>
                   <td
                     className={`px-4 py-2.5 text-right ${
                       row.success_rate_pct === null
-                        ? 'text-slate-500'
+                        ? 'text-muted-foreground'
                         : row.success_rate_pct >= 95
-                          ? 'text-emerald-400'
+                          ? 'text-severity-low'
                           : row.success_rate_pct >= 80
-                            ? 'text-orange-400'
-                            : 'text-red-400'
+                            ? 'text-severity-high'
+                            : 'text-destructive'
                     }`}
                   >
                     {row.success_rate_pct === null ? '-' : `${row.success_rate_pct}%`}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-slate-300">
+                  <td className="px-4 py-2.5 text-right text-foreground">
                     {row.avg_duration_seconds === null ? '-' : `${row.avg_duration_seconds}s`}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-slate-400">
+                  <td className="px-4 py-2.5 text-right text-muted-foreground">
                     {row.prompt_tokens.toLocaleString()} / {row.completion_tokens.toLocaleString()}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-slate-300">{formatCost(row.estimated_cost_usd)}</td>
+                  <td className="px-4 py-2.5 text-right text-foreground">{formatCost(row.estimated_cost_usd)}</td>
                 </tr>
               ))}
             </tbody>

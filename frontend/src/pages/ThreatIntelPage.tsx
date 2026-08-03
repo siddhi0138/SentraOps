@@ -93,8 +93,8 @@ export function ThreatIntelPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-lg font-semibold text-slate-100">Threat Intel Hub</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-lg font-semibold text-foreground">Threat Intel Hub</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             Known-bad indicators every organization's correlation engine matches ingested events against - shared
             across tenants, the way a commercial threat-intel feed is one subscription, not a per-customer copy.
           </p>
@@ -103,27 +103,27 @@ export function ThreatIntelPage() {
           <button
             onClick={() => void sync()}
             disabled={syncing}
-            className="rounded-lg border border-slate-700 hover:bg-slate-800 disabled:opacity-50 text-sm px-3 py-1.5 transition"
+            className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-sm px-3 py-1.5 transition"
           >
             {syncing ? 'Syncing...' : 'Sync URLhaus Feed'}
           </button>
         )}
       </div>
 
-      {message && <p className="text-sm text-emerald-400">{message}</p>}
-      {error && <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">{error}</p>}
+      {message && <p className="text-sm text-severity-low">{message}</p>}
+      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex flex-wrap gap-3">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search indicator..."
-          className="flex-1 min-w-[200px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+          className="flex-1 min-w-[200px] rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
         />
         <select
           value={type}
           onChange={(e) => setType(e.target.value as ThreatIndicatorType | '')}
-          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
+          className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground"
         >
           {TYPE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -133,35 +133,35 @@ export function ThreatIntelPage() {
         </select>
       </div>
 
-      {loading && <p className="text-slate-400 text-sm">Loading...</p>}
+      {loading && <p className="text-muted-foreground text-sm">Loading...</p>}
 
       {!loading && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 divide-y divide-slate-800">
-          {indicators.length === 0 && <p className="text-sm text-slate-500 p-4">No indicators found.</p>}
+        <div className="panel divide-y divide-secondary">
+          {indicators.length === 0 && <p className="text-sm text-muted-foreground p-4">No indicators found.</p>}
           {indicators.map((ind) => (
             <div key={ind.id} className="p-4 flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-sm text-slate-100 font-mono truncate">{ind.indicator}</p>
-                <p className="text-sm text-slate-400 mt-0.5">{ind.verdict}</p>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-sm text-foreground font-mono truncate">{ind.indicator}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">{ind.verdict}</p>
+                <p className="text-xs text-muted-foreground mt-1">
                   {ind.source} &middot; last seen {ind.last_seen}
                   {ind.tags && ` · tags: ${ind.tags}`}
                 </p>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0 text-xs">
-                <span className="uppercase tracking-wide text-slate-500">{ind.indicator_type}</span>
-                <span className="text-slate-300">{ind.confidence}% confidence</span>
+                <span className="uppercase tracking-wide text-muted-foreground">{ind.indicator_type}</span>
+                <span className="text-foreground">{ind.confidence}% confidence</span>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="panel p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-sm font-medium text-slate-300">Relationship Graph</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <h2 className="text-sm font-medium text-foreground">Relationship Graph</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
               How indicators relate through shared tags and sources, and which have actually matched in this
               organization's real incidents - the graph is queryable, not just a decorative view.
             </p>
@@ -170,14 +170,14 @@ export function ThreatIntelPage() {
             <button
               onClick={() => void syncGraph()}
               disabled={graphSyncing}
-              className="rounded-lg border border-slate-700 hover:bg-slate-800 disabled:opacity-50 text-sm px-3 py-1.5 transition shrink-0"
+              className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-sm px-3 py-1.5 transition shrink-0"
             >
               {graphSyncing ? 'Syncing...' : 'Sync Graph'}
             </button>
           )}
         </div>
         {graphLoading || !graph ? (
-          <p className="text-sm text-slate-500">Loading...</p>
+          <p className="text-sm text-muted-foreground">Loading...</p>
         ) : (
           <AttackGraphView data={graph} />
         )}

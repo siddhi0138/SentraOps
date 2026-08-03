@@ -41,11 +41,11 @@ const LIVE_STAGE_ICON: Record<LiveStage, string> = {
 }
 
 const ACTION_STATUS_STYLES: Record<ProposedActionStatus, string> = {
-  pending: 'bg-amber-600/80 text-amber-50',
-  approved: 'bg-emerald-700/80 text-emerald-50',
-  rejected: 'bg-slate-700 text-slate-300',
-  executed: 'bg-indigo-700/80 text-indigo-50',
-  execution_failed: 'bg-red-800/80 text-red-50',
+  pending: 'bg-severity-medium/80 text-severity-medium',
+  approved: 'bg-severity-low/80 text-severity-low',
+  rejected: 'bg-border text-foreground',
+  executed: 'bg-primary/80 text-primary',
+  execution_failed: 'bg-destructive/80 text-destructive',
 }
 
 function ActionStatusBadge({ status }: { status: ProposedActionStatus }) {
@@ -227,11 +227,11 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
   const messages = selectedRun?.messages ?? []
 
   return (
-    <div className="rounded-xl border border-violet-900/60 bg-violet-950/20 p-5 space-y-5">
+    <div className="rounded-xl border border-agent/60 bg-agent/20 p-5 space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-sm font-medium text-violet-300">AI Security Team</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h2 className="text-sm font-medium text-agent">AI Security Team</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
             Detection &rarr; Investigation &rarr; Threat Intel &rarr; Risk &rarr; Response &rarr; Report
           </p>
         </div>
@@ -239,21 +239,21 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
           <button
             onClick={() => void runInvestigation()}
             disabled={investigating}
-            className="rounded-lg border border-violet-700 hover:bg-violet-900/40 disabled:opacity-50 text-xs px-3 py-1.5 transition text-violet-300"
+            className="rounded-lg border border-agent hover:bg-agent/40 disabled:opacity-50 text-xs px-3 py-1.5 transition text-agent"
           >
             {investigating ? 'Investigating...' : runs.length > 0 ? 'Run Again' : 'Run Multi-Agent Investigation'}
           </button>
         )}
       </div>
 
-      {error && <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
 
       {liveStages && (
         <div className="flex flex-wrap gap-2">
           {AGENT_ORDER.map((agent) => (
             <span
               key={agent}
-              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-900/60 text-slate-300"
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-border bg-card/60 text-foreground"
             >
               <span>{LIVE_STAGE_ICON[liveStages[agent]]}</span>
               {AGENT_LABELS[agent]}
@@ -268,25 +268,25 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
           memory.repeat_users.length > 0 ||
           memory.recent_corrections.length > 0) && (
         <div>
-          <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">
-            Institutional Memory <span className="normal-case text-slate-600">&mdash; what the team already knows</span>
+          <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+            Institutional Memory <span className="normal-case text-muted-foreground">&mdash; what the team already knows</span>
           </h3>
           <div className="space-y-2">
             {memory.similar_past_incidents.map((s) => (
               <Link
                 key={`similar-${s.incident_id}`}
                 to={`/incidents/${s.incident_id}`}
-                className="flex items-start justify-between gap-3 text-sm rounded-lg border border-slate-800 bg-slate-900/60 p-3 hover:border-violet-800 transition"
+                className="flex items-start justify-between gap-3 text-sm panel p-3 hover:border-agent transition"
               >
                 <div className="min-w-0">
-                  <p className="text-slate-200 truncate">
-                    Similar past incident: <span className="text-violet-300">{s.title}</span>
+                  <p className="text-foreground truncate">
+                    Similar past incident: <span className="text-agent">{s.title}</span>
                   </p>
-                  {s.prior_report_summary && <p className="text-xs text-slate-500 mt-0.5">{s.prior_report_summary}</p>}
+                  {s.prior_report_summary && <p className="text-xs text-muted-foreground mt-0.5">{s.prior_report_summary}</p>}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {s.similarity !== null && (
-                    <span className="text-xs text-slate-500">{Math.round(s.similarity * 100)}% similar</span>
+                    <span className="text-xs text-muted-foreground">{Math.round(s.similarity * 100)}% similar</span>
                   )}
                   <SeverityBadge severity={s.risk_level} />
                 </div>
@@ -296,12 +296,12 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
               <Link
                 key={`repeat-${r.incident_id}-${i}`}
                 to={`/incidents/${r.incident_id}`}
-                className="flex items-start justify-between gap-3 text-sm rounded-lg border border-amber-900/60 bg-amber-950/10 p-3 hover:border-amber-700 transition"
+                className="flex items-start justify-between gap-3 text-sm rounded-lg border border-severity-medium/60 bg-severity-medium/10 p-3 hover:border-severity-medium transition"
               >
                 <div className="min-w-0">
-                  <p className="text-slate-200 truncate">
-                    Repeat involvement: <span className="text-amber-300">{r.shared.join(', ')}</span> also seen in{' '}
-                    <span className="text-slate-300">{r.title}</span>
+                  <p className="text-foreground truncate">
+                    Repeat involvement: <span className="text-severity-medium">{r.shared.join(', ')}</span> also seen in{' '}
+                    <span className="text-foreground">{r.title}</span>
                   </p>
                 </div>
                 <SeverityBadge severity={r.risk_level} />
@@ -311,13 +311,13 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
               <Link
                 key={`correction-${c.incident_id}`}
                 to={`/incidents/${c.incident_id}`}
-                className="flex items-start justify-between gap-3 text-sm rounded-lg border border-sky-900/60 bg-sky-950/10 p-3 hover:border-sky-700 transition"
+                className="flex items-start justify-between gap-3 text-sm rounded-lg border border-primary/60 bg-primary/10 p-3 hover:border-primary transition"
               >
                 <div className="min-w-0">
-                  <p className="text-slate-200 truncate">
-                    Analyst feedback ({c.rating.replace('_', ' ')}) on <span className="text-sky-300">{c.incident_title}</span>
+                  <p className="text-foreground truncate">
+                    Analyst feedback ({c.rating.replace('_', ' ')}) on <span className="text-primary">{c.incident_title}</span>
                   </p>
-                  <p className="text-xs text-slate-500 mt-0.5">{c.note}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{c.note}</p>
                 </div>
               </Link>
             ))}
@@ -326,7 +326,7 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
       )}
 
       {!loadingRuns && runs.length === 0 && !investigating && (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-muted-foreground">
           No investigations run yet. Kick off the AI Security Team to have six specialized agents independently
           detect, investigate, enrich, score, and respond to this incident - each reading what the ones before it
           found.
@@ -341,8 +341,8 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
               onClick={() => void openRun(run.id)}
               className={`text-xs px-2.5 py-1 rounded-lg border transition ${
                 selectedRun?.id === run.id
-                  ? 'border-violet-600 bg-violet-900/40 text-violet-200'
-                  : 'border-slate-700 text-slate-400 hover:bg-slate-800'
+                  ? 'border-agent bg-agent/40 text-agent'
+                  : 'border-border text-muted-foreground hover:bg-secondary'
               }`}
             >
               Run #{run.id} &middot; {run.status} &middot; {run.started_at}
@@ -352,19 +352,19 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
       )}
 
       {selectedRun?.error && (
-        <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">
+        <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">
           Run #{selectedRun.id} failed: {selectedRun.error}
         </p>
       )}
 
       {messages.length > 0 && (
         <div>
-          <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">Agent Conversation</h3>
+          <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Agent Conversation</h3>
           <ol className="space-y-2 max-h-72 overflow-y-auto pr-1">
             {messages.map((m, i) => (
-              <li key={m.id ?? i} className="text-sm border-l-2 border-violet-900 pl-3">
-                <p className="text-xs font-medium text-violet-300">{AGENT_LABELS[m.agent] ?? m.agent}</p>
-                <p className="text-slate-300">{m.content}</p>
+              <li key={m.id ?? i} className="text-sm border-l-2 border-agent pl-3">
+                <p className="text-xs font-medium text-agent">{AGENT_LABELS[m.agent] ?? m.agent}</p>
+                <p className="text-foreground">{m.content}</p>
               </li>
             ))}
           </ol>
@@ -374,30 +374,30 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
       {result && (
         <div className="grid md:grid-cols-2 gap-4">
           {result.detection && (
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
-              <p className="text-xs font-medium text-violet-300 mb-1">Detection</p>
-              <p className="text-sm text-slate-300">{result.detection.assessment}</p>
-              <p className="text-xs text-slate-500 mt-2">
+            <div className="panel p-4">
+              <p className="text-xs font-medium text-agent mb-1">Detection</p>
+              <p className="text-sm text-foreground">{result.detection.assessment}</p>
+              <p className="text-xs text-muted-foreground mt-2">
                 Pattern: {result.detection.attack_pattern} &middot; Confidence: {result.detection.confidence}%
               </p>
             </div>
           )}
           {result.investigation && (
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
-              <p className="text-xs font-medium text-violet-300 mb-1">Investigation</p>
-              <p className="text-sm text-slate-300">{result.investigation.timeline_narrative}</p>
-              <p className="text-xs text-slate-500 mt-2">Objective: {result.investigation.attacker_objective}</p>
+            <div className="panel p-4">
+              <p className="text-xs font-medium text-agent mb-1">Investigation</p>
+              <p className="text-sm text-foreground">{result.investigation.timeline_narrative}</p>
+              <p className="text-xs text-muted-foreground mt-2">Objective: {result.investigation.attacker_objective}</p>
             </div>
           )}
           {result.threat_intel_findings && (
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
-              <p className="text-xs font-medium text-violet-300 mb-1">Threat Intelligence</p>
-              <p className="text-sm text-slate-300">{result.threat_intel_findings.summary}</p>
+            <div className="panel p-4">
+              <p className="text-xs font-medium text-agent mb-1">Threat Intelligence</p>
+              <p className="text-sm text-foreground">{result.threat_intel_findings.summary}</p>
               {result.threat_intel_findings.mitre_techniques.length > 0 && (
                 <ul className="mt-2 space-y-1">
                   {result.threat_intel_findings.mitre_techniques.map((t) => (
-                    <li key={t.id} className="text-xs text-slate-400">
-                      <span className="font-mono text-slate-300">{t.id}</span> {t.name} &mdash; {t.evidence}
+                    <li key={t.id} className="text-xs text-muted-foreground">
+                      <span className="font-mono text-foreground">{t.id}</span> {t.name} &mdash; {t.evidence}
                     </li>
                   ))}
                 </ul>
@@ -405,13 +405,13 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
             </div>
           )}
           {result.risk && (
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
+            <div className="panel p-4">
               <div className="flex items-center gap-2 mb-1">
-                <p className="text-xs font-medium text-violet-300">Business Risk</p>
+                <p className="text-xs font-medium text-agent">Business Risk</p>
                 <SeverityBadge severity={result.risk.business_risk_level} />
               </div>
-              <p className="text-sm text-slate-300">{result.risk.explanation}</p>
-              <p className="text-xs text-slate-500 mt-2">
+              <p className="text-sm text-foreground">{result.risk.explanation}</p>
+              <p className="text-xs text-muted-foreground mt-2">
                 Score: {result.risk.business_risk_score}/100
                 {result.risk.most_critical_asset && ` · Most critical asset: ${result.risk.most_critical_asset}`}
               </p>
@@ -421,20 +421,20 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
       )}
 
       {result?.report && (
-        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 space-y-2">
-          <p className="text-xs font-medium text-violet-300">Final Report</p>
-          <p className="text-sm text-slate-300">{result.report.executive_summary}</p>
-          <p className="text-sm text-slate-400">{result.report.technical_summary}</p>
-          <p className="text-xs text-slate-500">Compliance: {result.report.compliance_notes}</p>
-          <p className="text-xs text-slate-500">Customer notification: {result.report.customer_notification}</p>
+        <div className="panel p-4 space-y-2">
+          <p className="text-xs font-medium text-agent">Final Report</p>
+          <p className="text-sm text-foreground">{result.report.executive_summary}</p>
+          <p className="text-sm text-muted-foreground">{result.report.technical_summary}</p>
+          <p className="text-xs text-muted-foreground">Compliance: {result.report.compliance_notes}</p>
+          <p className="text-xs text-muted-foreground">Customer notification: {result.report.customer_notification}</p>
         </div>
       )}
 
       {selectedRun && (
-        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+        <div className="panel p-4 space-y-3">
           <div>
-            <p className="text-xs font-medium text-violet-300">Learning Loop - Rate This Investigation</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs font-medium text-agent">Learning Loop - Rate This Investigation</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
               Corrections you note here are fed back into future investigations as institutional memory.
             </p>
           </div>
@@ -445,7 +445,7 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
                 onChange={(e) => setFeedbackNote(e.target.value)}
                 placeholder="Optional note - especially useful for false positives or missed detections"
                 rows={2}
-                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+                className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
               />
               <div className="flex flex-wrap gap-2">
                 {FEEDBACK_OPTIONS.map((opt) => (
@@ -453,7 +453,7 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
                     key={opt.value}
                     onClick={() => void submitFeedback(opt.value)}
                     disabled={submittingFeedback}
-                    className="rounded-lg border border-slate-700 hover:bg-slate-800 disabled:opacity-50 text-xs px-2.5 py-1.5 text-slate-300 transition"
+                    className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-xs px-2.5 py-1.5 text-foreground transition"
                   >
                     {opt.label}
                   </button>
@@ -464,11 +464,11 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
           {feedback.length > 0 && (
             <ul className="space-y-1.5 pt-1">
               {feedback.map((f) => (
-                <li key={f.id} className="text-xs text-slate-400">
-                  <span className="text-slate-300">{FEEDBACK_OPTIONS.find((o) => o.value === f.rating)?.label ?? f.rating}</span>
+                <li key={f.id} className="text-xs text-muted-foreground">
+                  <span className="text-foreground">{FEEDBACK_OPTIONS.find((o) => o.value === f.rating)?.label ?? f.rating}</span>
                   {' by '}
                   {f.reviewed_by_email}
-                  {f.note && <span className="text-slate-500"> - {f.note}</span>}
+                  {f.note && <span className="text-muted-foreground"> - {f.note}</span>}
                 </li>
               ))}
             </ul>
@@ -478,27 +478,27 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
 
       {actions.length > 0 && (
         <div>
-          <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">
+          <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
             Proposed Actions{result?.response ? ` (urgency: ${result.response.urgency})` : ''}
           </h3>
           <ul className="space-y-2">
             {actions.map((action) => (
               <li
                 key={action.id}
-                className="flex items-start justify-between gap-3 text-sm rounded-lg border border-slate-800 bg-slate-900/60 p-3"
+                className="flex items-start justify-between gap-3 text-sm panel p-3"
               >
                 <div className="min-w-0">
-                  <span className="text-xs uppercase tracking-wide text-slate-500 mr-2">{action.category}</span>
-                  <p className="text-slate-200 mt-0.5">{action.description}</p>
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground mr-2">{action.category}</span>
+                  <p className="text-foreground mt-0.5">{action.description}</p>
                   {action.reviewed_by_email && (
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {action.status} by {action.reviewed_by_email}
                     </p>
                   )}
                   {action.execution_result && (
-                    <ul className="text-xs text-slate-500 mt-1 space-y-0.5">
+                    <ul className="text-xs text-muted-foreground mt-1 space-y-0.5">
                       {action.execution_result.map((r, i) => (
-                        <li key={i} className={r.ok ? 'text-emerald-400' : 'text-red-400'}>
+                        <li key={i} className={r.ok ? 'text-severity-low' : 'text-destructive'}>
                           {r.integration}: {r.message}
                         </li>
                       ))}
@@ -511,14 +511,14 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
                       <button
                         onClick={() => void review(action.id, 'approved')}
                         disabled={reviewingId === action.id}
-                        className="rounded-lg border border-emerald-700 hover:bg-emerald-900/40 disabled:opacity-50 text-xs px-2.5 py-1 text-emerald-300 transition"
+                        className="rounded-lg border border-severity-low hover:bg-severity-low/40 disabled:opacity-50 text-xs px-2.5 py-1 text-severity-low transition"
                       >
                         Approve
                       </button>
                       <button
                         onClick={() => void review(action.id, 'rejected')}
                         disabled={reviewingId === action.id}
-                        className="rounded-lg border border-red-800 hover:bg-red-900/40 disabled:opacity-50 text-xs px-2.5 py-1 text-red-300 transition"
+                        className="rounded-lg border border-destructive hover:bg-destructive/40 disabled:opacity-50 text-xs px-2.5 py-1 text-destructive transition"
                       >
                         Reject
                       </button>
@@ -528,7 +528,7 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
                       <button
                         onClick={() => void execute(action.id)}
                         disabled={executingId === action.id}
-                        className="rounded-lg border border-indigo-700 hover:bg-indigo-900/40 disabled:opacity-50 text-xs px-2.5 py-1 text-indigo-300 transition"
+                        className="rounded-lg border border-primary hover:bg-primary/40 disabled:opacity-50 text-xs px-2.5 py-1 text-primary transition"
                       >
                         {executingId === action.id ? 'Executing...' : 'Execute'}
                       </button>

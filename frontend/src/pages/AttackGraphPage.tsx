@@ -82,8 +82,8 @@ export function AttackGraphPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-lg font-semibold text-slate-100">Attack Graph</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-lg font-semibold text-foreground">Attack Graph</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             How hosts, users, IPs, and incidents connect across the whole platform - not just within one incident.
           </p>
         </div>
@@ -91,23 +91,23 @@ export function AttackGraphPage() {
           <button
             onClick={() => void handleSync()}
             disabled={syncing}
-            className="rounded-lg border border-slate-700 hover:bg-slate-800 disabled:opacity-50 text-sm px-3 py-1.5 transition"
+            className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-sm px-3 py-1.5 transition"
           >
             {syncing ? 'Syncing...' : 'Sync Graph'}
           </button>
         )}
       </div>
 
-      {syncMessage && <p className="text-sm text-emerald-400">{syncMessage}</p>}
-      {error && <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">{error}</p>}
+      {syncMessage && <p className="text-sm text-severity-low">{syncMessage}</p>}
+      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 flex flex-wrap items-end gap-3">
+      <div className="panel p-4 flex flex-wrap items-end gap-3">
         <div>
-          <label className="block text-xs uppercase tracking-wide text-slate-500 mb-1">Entity type</label>
+          <label className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Entity type</label>
           <select
             value={entityType}
             onChange={(e) => setEntityType(e.target.value as EntityType)}
-            className="rounded bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm text-slate-100"
+            className="rounded bg-secondary border border-border px-2 py-1.5 text-sm text-foreground"
           >
             <option value="host">Host</option>
             <option value="user">User</option>
@@ -115,21 +115,21 @@ export function AttackGraphPage() {
           </select>
         </div>
         <div className="flex-1 min-w-[180px]">
-          <label className="block text-xs uppercase tracking-wide text-slate-500 mb-1">Value</label>
+          <label className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Value</label>
           <input
             value={entityValue}
             onChange={(e) => setEntityValue(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             placeholder="e.g. FINANCE-PC-21"
-            className="w-full rounded bg-slate-800 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="w-full rounded bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wide text-slate-500 mb-1">Hops</label>
+          <label className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Hops</label>
           <select
             value={hops}
             onChange={(e) => setHops(Number(e.target.value))}
-            className="rounded bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm text-slate-100"
+            className="rounded bg-secondary border border-border px-2 py-1.5 text-sm text-foreground"
           >
             {[1, 2, 3, 4].map((h) => (
               <option key={h} value={h}>
@@ -141,24 +141,24 @@ export function AttackGraphPage() {
         <button
           onClick={() => void handleSearch()}
           disabled={searching || !entityValue.trim()}
-          className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 transition"
+          className="rounded-lg bg-primary hover:bg-primary disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 transition"
         >
           {searching ? 'Searching...' : 'Blast Radius'}
         </button>
         {viewingEntity && (
-          <button onClick={() => void loadFullGraph()} className="text-sm text-slate-400 hover:text-slate-200 transition">
+          <button onClick={() => void loadFullGraph()} className="text-sm text-muted-foreground hover:text-foreground transition">
             &larr; Back to full graph
           </button>
         )}
       </div>
 
       {viewingEntity && (
-        <p className="text-sm text-slate-400">
-          Showing everything within {hops} hop{hops === 1 ? '' : 's'} of <span className="text-slate-200">{viewingEntity}</span>
+        <p className="text-sm text-muted-foreground">
+          Showing everything within {hops} hop{hops === 1 ? '' : 's'} of <span className="text-foreground">{viewingEntity}</span>
         </p>
       )}
 
-      {loading && <p className="text-slate-400 text-sm">Loading...</p>}
+      {loading && <p className="text-muted-foreground text-sm">Loading...</p>}
       {!loading && graph && <AttackGraphView data={graph} onNodeClick={handleNodeClick} />}
     </div>
   )

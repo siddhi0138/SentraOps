@@ -40,12 +40,12 @@ export function IncidentsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-lg font-semibold text-slate-100">Incidents</h1>
+        <h1 className="text-lg font-semibold text-foreground">Incidents</h1>
         <div className="flex gap-2">
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="">All statuses</option>
             <option value="open">Open</option>
@@ -54,7 +54,7 @@ export function IncidentsPage() {
           <select
             value={riskLevel}
             onChange={(e) => setRiskLevel(e.target.value)}
-            className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="">All risk levels</option>
             <option value="low">Low</option>
@@ -64,18 +64,18 @@ export function IncidentsPage() {
           </select>
           <button
             onClick={() => api.downloadIncidentsCsv({ status: status || undefined, risk_level: riskLevel || undefined })}
-            className="rounded-lg border border-slate-700 hover:bg-slate-800 text-sm px-3 py-1.5 transition"
+            className="rounded-lg border border-border hover:bg-secondary text-sm px-3 py-1.5 transition"
           >
             Export CSV
           </button>
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+      <div className="panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b border-slate-800">
+              <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground border-b border-secondary">
                 <th className="px-4 py-2 font-medium">Title</th>
                 <th className="px-4 py-2 font-medium">Confidence</th>
                 <th className="px-4 py-2 font-medium">Risk</th>
@@ -86,30 +86,30 @@ export function IncidentsPage() {
                 <th className="px-4 py-2 font-medium">Created</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-secondary">
               {incidents.map((incident) => (
-                <tr key={incident.id} className="hover:bg-slate-800/40">
+                <tr key={incident.id} className="hover:bg-secondary/40">
                   <td className="px-4 py-2">
-                    <Link to={`/incidents/${incident.id}`} className="text-indigo-400 hover:underline">
+                    <Link to={`/incidents/${incident.id}`} className="text-primary hover:underline">
                       {incident.title}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 text-slate-300">{incident.confidence}%</td>
+                  <td className="px-4 py-2 text-foreground">{incident.confidence}%</td>
                   <td className="px-4 py-2">
-                    <SeverityBadge severity={incident.risk_level} /> <span className="text-slate-500 text-xs">{incident.risk_score}</span>
+                    <SeverityBadge severity={incident.risk_level} /> <span className="text-muted-foreground text-xs">{incident.risk_score}</span>
                   </td>
                   <td className="px-4 py-2">
                     <StatusBadge status={incident.status} />
                   </td>
-                  <td className="px-4 py-2 text-slate-400">{incident.assignee_email ?? '-'}</td>
-                  <td className="px-4 py-2 text-slate-300">{incident.affected_hosts.join(', ')}</td>
-                  <td className="px-4 py-2 text-slate-400">{incident.event_count}</td>
-                  <td className="px-4 py-2 whitespace-nowrap text-slate-400 font-mono text-xs">{incident.created_at}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{incident.assignee_email ?? '-'}</td>
+                  <td className="px-4 py-2 text-foreground">{incident.affected_hosts.join(', ')}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{incident.event_count}</td>
+                  <td className="px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs">{incident.created_at}</td>
                 </tr>
               ))}
               {!loading && incidents.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                     No incidents match these filters.
                   </td>
                 </tr>
@@ -118,7 +118,7 @@ export function IncidentsPage() {
           </table>
         </div>
 
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 text-sm text-slate-400">
+        <div className="flex items-center justify-between px-4 py-3 border-t border-secondary text-sm text-muted-foreground">
           <span>
             {total === 0 ? '0' : `${offset + 1}-${Math.min(offset + PAGE_SIZE, total)}`} of {total}
           </span>
@@ -126,14 +126,14 @@ export function IncidentsPage() {
             <button
               disabled={!hasPrev}
               onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-              className="px-3 py-1 rounded-lg border border-slate-700 disabled:opacity-40 hover:bg-slate-800 transition"
+              className="px-3 py-1 rounded-lg border border-border disabled:opacity-40 hover:bg-secondary transition"
             >
               Previous
             </button>
             <button
               disabled={!hasNext}
               onClick={() => setOffset((o) => o + PAGE_SIZE)}
-              className="px-3 py-1 rounded-lg border border-slate-700 disabled:opacity-40 hover:bg-slate-800 transition"
+              className="px-3 py-1 rounded-lg border border-border disabled:opacity-40 hover:bg-secondary transition"
             >
               Next
             </button>

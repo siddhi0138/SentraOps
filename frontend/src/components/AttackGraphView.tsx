@@ -118,12 +118,12 @@ export function AttackGraphView({ data, onNodeClick }: Props) {
   const labelsPresent = Array.from(new Set(data.nodes.map((n) => n.label))) as GraphNodeLabel[]
 
   if (data.nodes.length === 0) {
-    return <p className="text-sm text-slate-500">No graph data - run a sync or check back after correlating incidents.</p>
+    return <p className="text-sm text-muted-foreground">No graph data - run a sync or check back after correlating incidents.</p>
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-3 text-xs text-slate-400">
+      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
         {labelsPresent
           .filter((label) => label !== 'Incident')
           .map((label) => (
@@ -134,13 +134,13 @@ export function AttackGraphView({ data, onNodeClick }: Props) {
           ))}
         {labelsPresent.includes('Incident') && (
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-500" />
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-muted-foreground" />
             Incident (colored by risk level)
           </span>
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950">
+      <div className="overflow-x-auto rounded-lg border border-secondary bg-background">
         <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" style={{ minWidth: 480, height: 480 }}>
           {data.edges.map((edge, i) => {
             const from = byKey.get(edge.from)

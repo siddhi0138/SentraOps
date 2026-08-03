@@ -18,9 +18,9 @@ export function SectionLayout({ tabs }: { tabs: SectionTab[] }) {
             end={tab.end}
             className={({ isActive }) =>
               cn(
-                '-mb-px shrink-0 border-b-2 px-3 py-2 font-mono text-xs whitespace-nowrap transition',
+                '-mb-px shrink-0 border-b-2 px-4 py-2.5 font-mono text-sm whitespace-nowrap transition',
                 isActive
-                  ? 'border-primary text-foreground'
+                  ? 'border-primary text-primary text-glow'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               )
             }

@@ -21,7 +21,7 @@ const EXAMPLE_QUESTIONS = [
 function SourceChip({ source }: { source: RagResult }) {
   const label = source.content_id ? `${source.content_type} #${source.content_id}` : source.content_type
   const inner = (
-    <span className="inline-block px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:border-indigo-500 hover:text-indigo-300 transition">
+    <span className="inline-block px-2 py-0.5 rounded bg-secondary border border-border text-xs text-foreground hover:border-primary hover:text-primary transition">
       {label}
     </span>
   )
@@ -68,12 +68,12 @@ export function AIAnalystPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
-      <h1 className="text-lg font-semibold text-slate-100 mb-4">AI Security Analyst</h1>
+      <h1 className="text-lg font-semibold text-foreground mb-4">AI Security Analyst</h1>
 
-      <div className="flex-1 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto panel p-4 space-y-4">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center gap-4 py-12">
-            <p className="text-slate-400 text-sm max-w-sm">
+            <p className="text-muted-foreground text-sm max-w-sm">
               Ask about events, incidents, or general security concepts. Answers are grounded in this platform's own
               data via semantic search - not a generic chatbot.
             </p>
@@ -82,7 +82,7 @@ export function AIAnalystPage() {
                 <button
                   key={q}
                   onClick={() => void send(q)}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-indigo-500 hover:text-indigo-300 transition"
+                  className="text-xs px-3 py-1.5 rounded-lg border border-border text-foreground hover:border-primary hover:text-primary transition"
                 >
                   {q}
                 </button>
@@ -96,10 +96,10 @@ export function AIAnalystPage() {
             <div
               className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm ${
                 message.role === 'user'
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-primary text-white'
                   : message.error
-                    ? 'bg-red-950/50 border border-red-900 text-red-300'
-                    : 'bg-slate-800 text-slate-100'
+                    ? 'bg-destructive/50 border border-destructive text-destructive'
+                    : 'bg-secondary text-foreground'
               }`}
             >
               {message.role === 'assistant' && !message.error ? (
@@ -111,7 +111,7 @@ export function AIAnalystPage() {
               )}
 
               {message.sources && message.sources.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-slate-700 flex flex-wrap gap-1.5">
+                <div className="mt-2 pt-2 border-t border-border flex flex-wrap gap-1.5">
                   {message.sources.map((source, j) => (
                     <SourceChip key={j} source={source} />
                   ))}
@@ -123,7 +123,7 @@ export function AIAnalystPage() {
 
         {sending && (
           <div className="flex justify-start">
-            <div className="rounded-xl px-4 py-2.5 bg-slate-800 text-slate-400 text-sm">Thinking...</div>
+            <div className="rounded-xl px-4 py-2.5 bg-secondary text-muted-foreground text-sm">Thinking...</div>
           </div>
         )}
 
@@ -136,12 +136,12 @@ export function AIAnalystPage() {
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask the AI analyst..."
           disabled={sending}
-          className="flex-1 rounded-lg bg-slate-800 border border-slate-700 px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+          className="flex-1 rounded-lg bg-secondary border border-border px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={sending || !input.trim()}
-          className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 transition"
+          className="rounded-lg bg-primary hover:bg-primary disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 transition"
         >
           Send
         </button>

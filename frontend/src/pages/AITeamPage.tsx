@@ -4,15 +4,15 @@ import { api, ApiError } from '../api/client'
 import type { AgentRunListItem, AgentRunStatus } from '../api/types'
 
 const STATUS_STYLES: Record<AgentRunStatus, string> = {
-  running: 'bg-amber-600/80 text-amber-50',
-  completed: 'bg-emerald-700/80 text-emerald-50',
-  failed: 'bg-red-800/80 text-red-50',
+  running: 'bg-severity-medium/80 text-severity-medium',
+  completed: 'bg-severity-low/80 text-severity-low',
+  failed: 'bg-destructive/80 text-destructive',
 }
 
 function RunStatusBadge({ status }: { status: AgentRunStatus }) {
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wide ${STATUS_STYLES[status]}`}>
-      {status === 'running' && <span className="h-1.5 w-1.5 rounded-full bg-amber-200 animate-pulse" />}
+      {status === 'running' && <span className="h-1.5 w-1.5 rounded-full bg-severity-medium animate-pulse" />}
       {status}
     </span>
   )
@@ -67,19 +67,19 @@ export function AITeamPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-slate-100">AI Team</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <h1 className="text-lg font-semibold text-foreground">AI Team</h1>
+        <p className="text-sm text-muted-foreground mt-1">
           {runningCount > 0
             ? `${runningCount} investigation${runningCount === 1 ? '' : 's'} in progress across the platform`
             : 'Recent and active multi-agent investigations across every incident'}
         </p>
       </div>
 
-      {error && <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">{error}</p>}
-      {loading && <p className="text-slate-400 text-sm">Loading...</p>}
+      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
+      {loading && <p className="text-muted-foreground text-sm">Loading...</p>}
 
       {!loading && runs.length === 0 && !error && (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-muted-foreground">
           No investigations have been run yet. Open an incident and run the AI Security Team to see it here.
         </p>
       )}
@@ -89,18 +89,18 @@ export function AITeamPage() {
           <Link
             key={run.id}
             to={`/incidents/${run.incident_id}`}
-            className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4 hover:border-violet-800 transition"
+            className="flex items-center justify-between gap-4 panel p-4 hover:border-agent transition"
           >
             <div className="min-w-0">
-              <p className="text-sm text-slate-200 truncate">{run.incident_title ?? `Incident #${run.incident_id}`}</p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-sm text-foreground truncate">{run.incident_title ?? `Incident #${run.incident_id}`}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
                 Run #{run.id} &middot; started {run.started_at}
                 {run.triggered_by_email && ` by ${run.triggered_by_email}`}
               </p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
               {run.stage && (
-                <span className="text-xs text-slate-400">{STAGE_LABELS[run.stage] ?? run.stage}</span>
+                <span className="text-xs text-muted-foreground">{STAGE_LABELS[run.stage] ?? run.stage}</span>
               )}
               <RunStatusBadge status={run.status} />
             </div>

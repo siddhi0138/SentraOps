@@ -212,7 +212,7 @@ export const api = {
   naturalLanguageQuery: (question: string) => request<QueryResult>('/query', { method: 'POST', body: { question } }),
 
   simulate: (scenario: string) => request<unknown>(`/simulate/${scenario}`, { method: 'POST' }),
-  correlate: () => request<{ incidents_created: number }>('/correlate', { method: 'POST' }),
+  correlate: () => request<{ incidents_created: number; incidents: IncidentSummary[] }>('/correlate', { method: 'POST' }),
 
   listIncidents: (params: { status?: string; risk_level?: string; limit?: number; offset?: number }) =>
     request<{ total: number; incidents: IncidentSummary[] }>('/incidents', { params }),

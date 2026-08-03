@@ -56,19 +56,19 @@ function StreamingSection({ canAct }: { canAct: boolean }) {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-sm font-medium text-slate-200">Real-Time Streaming Ingestion</h2>
-      <p className="text-xs text-slate-500">
+      <h2 className="text-sm font-medium text-foreground">Real-Time Streaming Ingestion</h2>
+      <p className="text-xs text-muted-foreground">
         High-volume log sources can publish onto a Redis Stream instead of waiting on a synchronous ingest request -
         a separate Celery worker drains it moments later (Redis Streams + a dispatched consumer standing in for a
         Kafka + Spark Streaming pipeline).
       </p>
       {status && (
-        <div className="flex gap-4 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-sm">
-          <span className="text-slate-300">
-            Queued: <span className="font-mono text-slate-100">{status.queued}</span>
+        <div className="flex gap-4 panel p-3 text-sm">
+          <span className="text-foreground">
+            Queued: <span className="font-mono text-foreground">{status.queued}</span>
           </span>
-          <span className="text-slate-300">
-            Awaiting processing: <span className="font-mono text-slate-100">{status.pending}</span>
+          <span className="text-foreground">
+            Awaiting processing: <span className="font-mono text-foreground">{status.pending}</span>
           </span>
         </div>
       )}
@@ -76,7 +76,7 @@ function StreamingSection({ canAct }: { canAct: boolean }) {
         <button
           onClick={() => void sendTestLog()}
           disabled={sending}
-          className="rounded-lg border border-indigo-700 hover:bg-indigo-900/40 disabled:opacity-50 text-xs px-3 py-1.5 text-indigo-300 transition"
+          className="rounded-lg border border-primary hover:bg-primary/40 disabled:opacity-50 text-xs px-3 py-1.5 text-primary transition"
         >
           {sending ? 'Sending...' : 'Send Test Log via Stream'}
         </button>
@@ -94,7 +94,7 @@ function ConfigForm({
   config: Record<string, string>
   onChange: (config: Record<string, string>) => void
 }) {
-  if (fields.length === 0) return <p className="text-xs text-slate-500">No configuration needed.</p>
+  if (fields.length === 0) return <p className="text-xs text-muted-foreground">No configuration needed.</p>
   return (
     <div className="space-y-2">
       {fields.map((field) => (
@@ -103,7 +103,7 @@ function ConfigForm({
           placeholder={field}
           value={config[field] ?? ''}
           onChange={(e) => onChange({ ...config, [field]: e.target.value })}
-          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+          className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
         />
       ))}
     </div>
@@ -168,16 +168,16 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
 
   return (
     <div className="space-y-4">
-      <h2 className="text-sm font-medium text-slate-200">Connectors</h2>
-      <p className="text-xs text-slate-500">
+      <h2 className="text-sm font-medium text-foreground">Connectors</h2>
+      <p className="text-xs text-muted-foreground">
         Real, keyless log-source integrations that pull data into the platform through the same ingestion pipeline as
         file uploads.
       </p>
 
-      {message && <p className="text-xs text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2">{message}</p>}
+      {message && <p className="text-xs text-muted-foreground bg-card/60 border border-secondary rounded-lg px-3 py-2">{message}</p>}
 
       {canCreate && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+        <div className="panel p-4 space-y-3">
           <div className="flex gap-2">
             <select
               value={pluginKey}
@@ -185,7 +185,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
                 setPluginKey(e.target.value)
                 setConfig({})
               }}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
+              className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground"
             >
               {plugins.map((p) => (
                 <option key={p.key} value={p.key}>
@@ -197,7 +197,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
               placeholder="Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+              className="flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
             />
           </div>
           {selectedPlugin && (
@@ -205,7 +205,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
           )}
           <button
             onClick={() => void create()}
-            className="rounded-lg border border-indigo-700 hover:bg-indigo-900/40 text-xs px-3 py-1.5 text-indigo-300 transition"
+            className="rounded-lg border border-primary hover:bg-primary/40 text-xs px-3 py-1.5 text-primary transition"
           >
             Add Connector
           </button>
@@ -214,13 +214,13 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
 
       <div className="space-y-2">
         {instances.map((c) => (
-          <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+          <div key={c.id} className="panel p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm text-slate-200">
-                  {c.name} <span className="text-xs text-slate-500">({c.plugin_key})</span>
+                <p className="text-sm text-foreground">
+                  {c.name} <span className="text-xs text-muted-foreground">({c.plugin_key})</span>
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   {c.last_sync_at
                     ? `Last sync ${c.last_sync_status}: ${c.last_sync_message ?? ''} (${c.last_sync_at})`
                     : 'Never synced'}
@@ -231,14 +231,14 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
                   <button
                     onClick={() => void test(c.id)}
                     disabled={busyId === c.id}
-                    className="rounded-lg border border-slate-700 hover:bg-slate-800 disabled:opacity-50 text-xs px-2.5 py-1 text-slate-300 transition"
+                    className="rounded-lg border border-border hover:bg-secondary disabled:opacity-50 text-xs px-2.5 py-1 text-foreground transition"
                   >
                     Test
                   </button>
                   <button
                     onClick={() => void sync(c.id)}
                     disabled={busyId === c.id}
-                    className="rounded-lg border border-emerald-700 hover:bg-emerald-900/40 disabled:opacity-50 text-xs px-2.5 py-1 text-emerald-300 transition"
+                    className="rounded-lg border border-severity-low hover:bg-severity-low/40 disabled:opacity-50 text-xs px-2.5 py-1 text-severity-low transition"
                   >
                     {busyId === c.id ? 'Syncing...' : 'Sync Now'}
                   </button>
@@ -247,7 +247,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
             </div>
           </div>
         ))}
-        {instances.length === 0 && <p className="text-sm text-slate-500">No connectors configured yet.</p>}
+        {instances.length === 0 && <p className="text-sm text-muted-foreground">No connectors configured yet.</p>}
       </div>
     </div>
   )
@@ -287,14 +287,14 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-sm font-medium text-slate-200">Response Action Integrations</h2>
-      <p className="text-xs text-slate-500">
+      <h2 className="text-sm font-medium text-foreground">Response Action Integrations</h2>
+      <p className="text-xs text-muted-foreground">
         Where an <em>approved</em> proposed action actually gets executed. Nothing here ever fires automatically -
         the AI only proposes, a human approves, and a human then hits Execute on the incident page.
       </p>
 
       {canCreate && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+        <div className="panel p-4 space-y-3">
           <div className="flex gap-2">
             <select
               value={pluginKey}
@@ -302,7 +302,7 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
                 setPluginKey(e.target.value)
                 setConfig({})
               }}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
+              className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground"
             >
               {plugins.map((p) => (
                 <option key={p.key} value={p.key}>
@@ -314,7 +314,7 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
               placeholder="Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+              className="flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
             />
           </div>
           {selectedPlugin && (
@@ -322,7 +322,7 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
           )}
           <button
             onClick={() => void create()}
-            className="rounded-lg border border-indigo-700 hover:bg-indigo-900/40 text-xs px-3 py-1.5 text-indigo-300 transition"
+            className="rounded-lg border border-primary hover:bg-primary/40 text-xs px-3 py-1.5 text-primary transition"
           >
             Add Integration
           </button>
@@ -331,13 +331,13 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
 
       <div className="space-y-2">
         {instances.map((a) => (
-          <div key={a.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-            <p className="text-sm text-slate-200">
-              {a.name} <span className="text-xs text-slate-500">({a.plugin_key})</span>
+          <div key={a.id} className="panel p-3">
+            <p className="text-sm text-foreground">
+              {a.name} <span className="text-xs text-muted-foreground">({a.plugin_key})</span>
             </p>
           </div>
         ))}
-        {instances.length === 0 && <p className="text-sm text-slate-500">No response-action integrations configured yet.</p>}
+        {instances.length === 0 && <p className="text-sm text-muted-foreground">No response-action integrations configured yet.</p>}
       </div>
     </div>
   )
@@ -351,8 +351,8 @@ export function IntegrationsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-lg font-semibold text-slate-100">Integrations</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <h1 className="text-lg font-semibold text-foreground">Integrations</h1>
+        <p className="text-sm text-muted-foreground mt-1">
           Pluggable connectors (inbound log sources) and response actions (outbound execution targets) - see
           app/plugins/ on the backend for how to add more.
         </p>

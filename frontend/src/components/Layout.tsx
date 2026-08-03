@@ -7,14 +7,18 @@ import {
   ChevronsUpDown,
   LayoutDashboard,
   LogOut,
+  Menu,
+  Moon,
   Radar,
   Search,
   Settings,
   ShieldAlert,
+  Sun,
 } from 'lucide-react'
-import type { ComponentType } from 'react'
+import type { ComponentType, CSSProperties } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useTheme } from '../theme/ThemeContext'
 import { NotificationBell } from './NotificationBell'
 import { SearchBar } from './SearchBar'
 import {
@@ -30,6 +34,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
@@ -74,22 +79,67 @@ function activeItem(pathname: string): NavItem | undefined {
   )
 }
 
+// First 4 of the 7 sections + a "More" button that opens the full drawer -
+// a real mobile-first bottom tab bar (thumb-reachable, fixed to viewport),
+// not just the desktop sidebar squeezed onto a phone. Rendered inside
+// SidebarProvider so it can reuse the same drawer the sidebar trigger opens.
+const MOBILE_TAB_ITEMS = NAV_ITEMS.slice(0, 4)
+
+function MobileTabBar({ current }: { current: NavItem | undefined }) {
+  const { setOpenMobile } = useSidebar()
+  const moreActive = current && !MOBILE_TAB_ITEMS.some((item) => item.to === current.to)
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-40 flex h-14 items-stretch border-t border-border bg-background/95 backdrop-blur sm:hidden">
+      {MOBILE_TAB_ITEMS.map((item) => {
+        const isActive = current?.to === item.to
+        return (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={`flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] ${
+              isActive ? 'text-primary' : 'text-muted-foreground'
+            }`}
+          >
+            <item.icon className={`h-5 w-5 ${isActive ? 'text-glow' : ''}`} />
+            {item.label}
+          </NavLink>
+        )
+      })}
+      <button
+        onClick={() => setOpenMobile(true)}
+        className={`flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] ${
+          moreActive ? 'text-primary' : 'text-muted-foreground'
+        }`}
+      >
+        <Menu className={`h-5 w-5 ${moreActive ? 'text-glow' : ''}`} />
+        More
+      </button>
+    </nav>
+  )
+}
+
 export function Layout() {
   const { user, logout } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const location = useLocation()
   const current = activeItem(location.pathname)
 
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      style={{ '--sidebar-width-icon': '3.75rem' } as CSSProperties}
+    >
       <Sidebar collapsible="icon">
         <SidebarHeader className="px-3 py-3">
           <div className="flex items-center gap-2 px-1">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
-              <Activity className="h-4 w-4" />
+            <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary glow-primary">
+              <Activity className="h-4 w-4 text-glow" />
+              <span className="absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-severity-low pulse-dot" />
             </div>
             <div className="flex flex-col leading-none group-data-[collapsible=icon]:hidden">
               <span className="font-mono text-sm font-semibold text-foreground">CyberSentinel</span>
-              <span className="text-[11px] text-muted-foreground">AI Security Ops</span>
+              <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">AI Security Ops</span>
             </div>
           </div>
         </SidebarHeader>
@@ -104,11 +154,12 @@ export function Layout() {
                       <SidebarMenuButton
                         isActive={isActive}
                         tooltip={item.label}
-                        className="rounded-none border-l-2 border-transparent pl-2.5 data-[active=true]:border-primary data-[active=true]:bg-primary/10"
+                        size="lg"
+                        className="rounded-none border-l-2 border-transparent pl-3 text-[15px] gap-3 data-[active=true]:border-primary data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:text-glow group-data-[collapsible=icon]:size-11! group-data-[collapsible=icon]:p-2!"
                         render={
                           <NavLink to={item.to} end={item.end}>
-                            <item.icon className="h-4 w-4" />
-                            <span>{item.label}</span>
+                            <item.icon className="h-5 w-5 shrink-0" />
+                            <span className="truncate group-data-[collapsible=icon]:hidden">{item.label}</span>
                           </NavLink>
                         }
                       />
@@ -143,6 +194,10 @@ export function Layout() {
                 </div>
                 <div className="mt-0.5 font-mono text-[10px]">invite code: {user?.organization_slug}</div>
               </div>
+              <DropdownMenuItem onClick={toggleTheme}>
+                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={logout}>
                 <LogOut className="h-4 w-4" />
                 Log out
@@ -153,27 +208,41 @@ export function Layout() {
       </Sidebar>
 
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background/60 px-4 backdrop-blur">
           <div className="flex min-w-0 items-center gap-3">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="h-4" />
             <h1 className="truncate text-sm font-medium text-foreground">{current?.label ?? 'CyberSentinel AI'}</h1>
-            <Badge variant="outline" className="hidden font-mono text-[10px] text-muted-foreground sm:inline-flex">
+            <Badge variant="outline" className="hidden items-center gap-1.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-severity-low pulse-dot" />
               <BookOpen className="h-3 w-3" />
               live
             </Badge>
           </div>
-          <div className="flex items-center gap-3">
-            <SearchBar />
+          <div className="flex shrink-0 items-center gap-3">
+            <div className="hidden sm:block">
+              <SearchBar />
+            </div>
             <NotificationBell />
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto px-6 py-6">
+        <main className="relative flex-1 overflow-y-auto px-4 py-4 pb-20 sm:px-6 sm:py-6 sm:pb-6">
+          <div className="pointer-events-none fixed inset-0 -z-10 grid-bg opacity-30" />
           <div className="mx-auto max-w-6xl">
             <Outlet />
           </div>
         </main>
+        <footer className="sticky bottom-0 z-30 hidden h-9 shrink-0 items-center justify-between gap-3 border-t border-border bg-background/60 px-4 text-[11px] text-muted-foreground backdrop-blur sm:flex">
+          <span className="truncate">
+            {user?.organization_name} <span className="hidden sm:inline">&middot; {user?.role}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 font-mono">
+            <span className="h-1.5 w-1.5 rounded-full bg-severity-low pulse-dot" />
+            SentraOps
+          </span>
+        </footer>
       </SidebarInset>
+      <MobileTabBar current={current} />
     </SidebarProvider>
   )
 }

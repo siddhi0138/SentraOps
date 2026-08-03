@@ -32,19 +32,19 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
 
   if (!editing) {
     return (
-      <tr className="hover:bg-slate-800/40">
-        <td className="px-4 py-2 text-slate-200">{asset.host}</td>
+      <tr className="hover:bg-secondary/40">
+        <td className="px-4 py-2 text-foreground">{asset.host}</td>
         <td className="px-4 py-2">
           <SeverityBadge severity={asset.criticality} />
         </td>
-        <td className="px-4 py-2 text-slate-300">{asset.department ?? '-'}</td>
-        <td className="px-4 py-2 text-slate-300">{asset.owner ?? '-'}</td>
-        <td className="px-4 py-2 text-slate-300">{asset.os ?? '-'}</td>
-        <td className="px-4 py-2 text-slate-400">{asset.event_count}</td>
-        <td className="px-4 py-2 whitespace-nowrap text-slate-400 font-mono text-xs">{asset.last_seen}</td>
+        <td className="px-4 py-2 text-foreground">{asset.department ?? '-'}</td>
+        <td className="px-4 py-2 text-foreground">{asset.owner ?? '-'}</td>
+        <td className="px-4 py-2 text-foreground">{asset.os ?? '-'}</td>
+        <td className="px-4 py-2 text-muted-foreground">{asset.event_count}</td>
+        <td className="px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs">{asset.last_seen}</td>
         <td className="px-4 py-2">
           {canEdit && (
-            <button onClick={() => setEditing(true)} className="text-indigo-400 hover:underline text-xs">
+            <button onClick={() => setEditing(true)} className="text-primary hover:underline text-xs">
               Edit
             </button>
           )}
@@ -54,13 +54,13 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
   }
 
   return (
-    <tr className="bg-slate-800/40">
-      <td className="px-4 py-2 text-slate-200">{asset.host}</td>
+    <tr className="bg-secondary/40">
+      <td className="px-4 py-2 text-foreground">{asset.host}</td>
       <td className="px-4 py-2">
         <select
           value={criticality}
           onChange={(e) => setCriticality(e.target.value as Severity)}
-          className="rounded bg-slate-800 border border-slate-700 px-2 py-1 text-xs text-slate-100"
+          className="rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground"
         >
           {CRITICALITIES.map((c) => (
             <option key={c} value={c}>
@@ -70,26 +70,26 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
         </select>
       </td>
       <td className="px-4 py-2">
-        <input value={department} onChange={(e) => setDepartment(e.target.value)} className="w-28 rounded bg-slate-800 border border-slate-700 px-2 py-1 text-xs text-slate-100" />
+        <input value={department} onChange={(e) => setDepartment(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
       </td>
       <td className="px-4 py-2">
-        <input value={owner} onChange={(e) => setOwner(e.target.value)} className="w-28 rounded bg-slate-800 border border-slate-700 px-2 py-1 text-xs text-slate-100" />
+        <input value={owner} onChange={(e) => setOwner(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
       </td>
       <td className="px-4 py-2">
-        <input value={os} onChange={(e) => setOs(e.target.value)} className="w-28 rounded bg-slate-800 border border-slate-700 px-2 py-1 text-xs text-slate-100" />
+        <input value={os} onChange={(e) => setOs(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
       </td>
-      <td className="px-4 py-2 text-slate-400">{asset.event_count}</td>
-      <td className="px-4 py-2 whitespace-nowrap text-slate-400 font-mono text-xs">{asset.last_seen}</td>
+      <td className="px-4 py-2 text-muted-foreground">{asset.event_count}</td>
+      <td className="px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs">{asset.last_seen}</td>
       <td className="px-4 py-2">
         <div className="flex gap-2">
-          <button disabled={saving} onClick={save} className="text-emerald-400 hover:underline text-xs disabled:opacity-50">
+          <button disabled={saving} onClick={save} className="text-severity-low hover:underline text-xs disabled:opacity-50">
             Save
           </button>
-          <button onClick={() => setEditing(false)} className="text-slate-400 hover:underline text-xs">
+          <button onClick={() => setEditing(false)} className="text-muted-foreground hover:underline text-xs">
             Cancel
           </button>
         </div>
-        {saveError && <p className="text-red-400 text-xs mt-1">{saveError}</p>}
+        {saveError && <p className="text-destructive text-xs mt-1">{saveError}</p>}
       </td>
     </tr>
   )
@@ -136,20 +136,20 @@ export function AssetsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-lg font-semibold text-slate-100">Assets</h1>
+        <h1 className="text-lg font-semibold text-foreground">Assets</h1>
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search host, department, owner..."
-          className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 w-72 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground w-72 focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+      <div className="panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b border-slate-800">
+              <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground border-b border-secondary">
                 <th className="px-4 py-2 font-medium">Host</th>
                 <th className="px-4 py-2 font-medium">Criticality</th>
                 <th className="px-4 py-2 font-medium">Department</th>
@@ -160,13 +160,13 @@ export function AssetsPage() {
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-secondary">
               {assets.map((asset) => (
                 <AssetRow key={asset.id} asset={asset} canEdit={canEdit} onSaved={handleSaved} />
               ))}
               {!loading && assets.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                     No assets discovered yet. Assets appear automatically as logs are ingested.
                   </td>
                 </tr>
@@ -174,7 +174,7 @@ export function AssetsPage() {
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-3 border-t border-slate-800 text-sm text-slate-400">{total} total</div>
+        <div className="px-4 py-3 border-t border-secondary text-sm text-muted-foreground">{total} total</div>
       </div>
     </div>
   )
