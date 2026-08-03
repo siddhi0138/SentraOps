@@ -25,18 +25,21 @@ body {
   background-attachment: fixed;
 }
 
-/* CyberSentinel is a SOC monitoring tool, run on a wall or a dim ops room -
-   it commits to one dark visual world by design, the same reasoning real
-   SOC/NOC software (PagerDuty, Grafana in production) uses, not an
-   unfinished light theme. */
+/* Defaults to dark (SOC console context - a wall/ops-room display), but the
+   user can toggle to light via ThemeContext, which flips the .dark class on
+   <html> and this along with it. */
 html {
+  color-scheme: light;
+}
+html.dark {
   color-scheme: dark;
 }
 
-/* color-scheme:dark above makes Chrome/Edge switch to their *native* dark
+/* color-scheme:dark makes Chrome/Edge switch to their *native* dark
    scrollbar (boxy track, visible up/down arrow buttons) - hidden entirely
-   rather than restyled. Scrolling itself still works via wheel/trackpad/
-   keyboard, there's just no visible track/thumb/arrows anywhere. */
+   rather than restyled, in both themes, for visual consistency. Scrolling
+   itself still works via wheel/trackpad/keyboard, there's just no visible
+   track/thumb/arrows anywhere. */
 * {
   scrollbar-width: none;
 }
@@ -96,20 +99,68 @@ html {
   --radius-4xl: calc(var(--radius) * 2.4);
 }
 
+/* Light theme (default) - same signal-cyan brand hue and severity hues as
+   dark, just re-lit for a white console instead of a dim ops-room wall.
+   Chroma/lightness re-tuned per token (not a blind invert) so text-on-bg
+   contrast stays readable in both directions. */
+:root {
+  --background: oklch(0.985 0.003 250);
+  --foreground: oklch(0.2 0.018 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.018 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.018 250);
+  --primary: oklch(0.52 0.15 195);
+  --primary-foreground: oklch(0.99 0.005 195);
+  --secondary: oklch(0.94 0.008 250);
+  --secondary-foreground: oklch(0.25 0.02 250);
+  --muted: oklch(0.95 0.006 250);
+  --muted-foreground: oklch(0.48 0.02 240);
+  --accent: oklch(0.92 0.03 224);
+  --accent-foreground: oklch(0.32 0.05 224);
+  --destructive: oklch(0.52 0.2 22);
+  --border: oklch(0.88 0.012 250);
+  --input: oklch(0.88 0.012 250);
+  --ring: oklch(0.52 0.15 195);
+  --chart-1: oklch(0.52 0.15 195);
+  --chart-2: oklch(0.5 0.14 300);
+  --chart-3: oklch(0.55 0.15 85);
+  --chart-4: oklch(0.5 0.18 25);
+  --chart-5: oklch(0.5 0.13 155);
+  --radius: 0.45rem;
+  --sidebar: oklch(0.97 0.005 250);
+  --sidebar-foreground: oklch(0.25 0.02 250);
+  --sidebar-primary: oklch(0.52 0.15 195);
+  --sidebar-primary-foreground: oklch(0.99 0.005 195);
+  --sidebar-accent: oklch(0.93 0.008 250);
+  --sidebar-accent-foreground: oklch(0.25 0.02 250);
+  --sidebar-border: oklch(0.89 0.012 250);
+  --sidebar-ring: oklch(0.52 0.15 195);
+
+  --severity-low: oklch(0.48 0.14 155);
+  --severity-medium: oklch(0.52 0.14 85);
+  --severity-high: oklch(0.5 0.18 45);
+  --severity-critical: oklch(0.5 0.21 22);
+
+  --agent: oklch(0.48 0.14 300);
+  --agent-foreground: oklch(0.99 0.01 300);
+}
+
 /* A deliberate signal-blue-on-charcoal palette, not shadcn's default
    grayscale theme - chosen to read as "SOC telemetry console", not
-   "generic AI-generated dashboard". Same values under :root and .dark
-   since this app commits to one dark world (see the html{color-scheme}
-   comment above) rather than toggling a class that's never applied. */
-:root, .dark {
+   "generic AI-generated dashboard". Default theme (see html.dark above);
+   toggled via ThemeContext, which flips the .dark class on <html>. */
+.dark {
   --background: oklch(0.16 0.014 250);
   --foreground: oklch(0.93 0.008 240);
   --card: oklch(0.195 0.015 250);
   --card-foreground: oklch(0.93 0.008 240);
   --popover: oklch(0.205 0.016 250);
   --popover-foreground: oklch(0.93 0.008 240);
-  --primary: oklch(0.72 0.14 224);
-  --primary-foreground: oklch(0.15 0.02 250);
+  /* Brighter signal-cyan brand color (was a more muted blue) - reads closer
+     to a live SOC console glow, matching the reference redesign. */
+  --primary: oklch(0.82 0.17 195);
+  --primary-foreground: oklch(0.16 0.02 250);
   --secondary: oklch(0.26 0.018 250);
   --secondary-foreground: oklch(0.9 0.008 240);
   --muted: oklch(0.23 0.016 250);
@@ -119,21 +170,21 @@ html {
   --destructive: oklch(0.62 0.19 22);
   --border: oklch(0.29 0.018 250);
   --input: oklch(0.29 0.018 250);
-  --ring: oklch(0.72 0.14 224);
-  --chart-1: oklch(0.72 0.14 224);
+  --ring: oklch(0.82 0.17 195);
+  --chart-1: oklch(0.82 0.17 195);
   --chart-2: oklch(0.7 0.13 300);
   --chart-3: oklch(0.75 0.16 85);
   --chart-4: oklch(0.68 0.18 25);
   --chart-5: oklch(0.72 0.15 155);
   --radius: 0.45rem;
-  --sidebar: oklch(0.145 0.013 250);
+  --sidebar: oklch(0.13 0.016 250);
   --sidebar-foreground: oklch(0.9 0.008 240);
-  --sidebar-primary: oklch(0.72 0.14 224);
-  --sidebar-primary-foreground: oklch(0.15 0.02 250);
+  --sidebar-primary: oklch(0.82 0.17 195);
+  --sidebar-primary-foreground: oklch(0.16 0.02 250);
   --sidebar-accent: oklch(0.23 0.016 250);
   --sidebar-accent-foreground: oklch(0.9 0.008 240);
   --sidebar-border: oklch(0.26 0.018 250);
-  --sidebar-ring: oklch(0.72 0.14 224);
+  --sidebar-ring: oklch(0.82 0.17 195);
 
   /* Semantic severity - deliberately separate from --primary, never
      doubles as the brand accent, only ever means "this state" at a glance. */
@@ -170,4 +221,42 @@ html {
   input[type='number'] {
     -moz-appearance: textfield;
   }
+}
+
+/* Glass "console panel" surface - the recurring card treatment across
+   every page after the SOC-console reskin, replacing flat bg-card blocks
+   with a subtle gradient + blur so panels read as HUD glass, not paper. */
+@utility panel {
+  background: linear-gradient(180deg,
+    color-mix(in oklch, var(--card) 94%, transparent),
+    color-mix(in oklch, var(--card) 80%, transparent));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  backdrop-filter: blur(6px);
+}
+
+/* Faint fixed grid backdrop for hero/section panels - distinct from the
+   page-level grid on body (finer, meant to sit inside a panel). */
+@utility grid-bg {
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--foreground) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 5%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+@utility text-glow {
+  text-shadow: 0 0 12px color-mix(in oklch, currentColor 45%, transparent);
+}
+
+@utility glow-primary {
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 40%, transparent),
+              0 0 24px -4px color-mix(in oklch, var(--primary) 45%, transparent);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+@utility pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
 }
