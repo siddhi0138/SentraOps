@@ -1,9 +1,14 @@
 import type {
+  AppNotification,
+  Asset,
   EventItem,
+  IncidentComment,
   IncidentDetail,
   IncidentStatus,
   IncidentSummary,
   Role,
+  SearchResults,
+  Severity,
   TokenPair,
   User,
 } from './types'
@@ -53,6 +58,16 @@ async function refreshAccessToken(): Promise<boolean> {
   return true
 }
 
+function buildUrl(path: string, params?: Record<string, string | number | undefined>): URL {
+  const url = new URL(`${API_BASE}${path}`, window.location.origin)
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== '') url.searchParams.set(key, String(value))
+    }
+  }
+  return url
+}
+
 interface RequestOptions {
   method?: string
   body?: unknown
@@ -60,16 +75,7 @@ interface RequestOptions {
   auth?: boolean
 }
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, params, auth = true } = options
-
-  const url = new URL(`${API_BASE}${path}`, window.location.origin)
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== '') url.searchParams.set(key, String(value))
-    }
-  }
-
+async function authedFetch(url: URL, method: string, body?: unknown, auth = true): Promise<Response> {
   const doFetch = () => {
     const headers: Record<string, string> = {}
     if (body !== undefined) headers['Content-Type'] = 'application/json'
@@ -85,10 +91,15 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   let res = await doFetch()
-
   if (res.status === 401 && auth && (await refreshAccessToken())) {
     res = await doFetch()
   }
+  return res
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, params, auth = true } = options
+  const res = await authedFetch(buildUrl(path, params), method, body, auth)
 
   if (!res.ok) {
     let detail = res.statusText
@@ -103,6 +114,21 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+async function downloadFile(path: string, params: Record<string, string | number | undefined> | undefined, filename: string): Promise<void> {
+  const res = await authedFetch(buildUrl(path, params), 'GET')
+  if (!res.ok) throw new ApiError(res.status, res.statusText)
+
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectUrl)
 }
 
 export const api = {
@@ -125,13 +151,33 @@ export const api = {
     limit?: number
     offset?: number
   }) => request<{ total: number; events: EventItem[] }>('/events', { params }),
+  downloadEventsCsv: (params: { q?: string; event_type?: string; severity?: string }) =>
+    downloadFile('/events/export.csv', params, 'events.csv'),
 
   simulate: (scenario: string) => request<unknown>(`/simulate/${scenario}`, { method: 'POST' }),
   correlate: () => request<{ incidents_created: number }>('/correlate', { method: 'POST' }),
 
   listIncidents: (params: { status?: string; risk_level?: string; limit?: number; offset?: number }) =>
     request<{ total: number; incidents: IncidentSummary[] }>('/incidents', { params }),
+  downloadIncidentsCsv: (params: { status?: string; risk_level?: string }) =>
+    downloadFile('/incidents/export.csv', params, 'incidents.csv'),
   getIncident: (id: number) => request<IncidentDetail>(`/incidents/${id}`),
-  updateIncidentStatus: (id: number, status: IncidentStatus) =>
-    request<IncidentDetail>(`/incidents/${id}`, { method: 'PATCH', params: { status } }),
+  downloadIncidentReport: (id: number) => downloadFile(`/incidents/${id}/report.md`, undefined, `incident-${id}-report.md`),
+  updateIncident: (id: number, payload: { status?: IncidentStatus; priority?: Severity; assignee_id?: number | null }) =>
+    request<IncidentDetail>(`/incidents/${id}`, { method: 'PATCH', body: payload }),
+  addComment: (id: number, body: string) => request<IncidentComment>(`/incidents/${id}/comments`, { method: 'POST', body: { body } }),
+
+  listAssets: (params: { q?: string; limit?: number; offset?: number }) =>
+    request<{ total: number; assets: Asset[] }>('/assets', { params }),
+  updateAsset: (id: number, payload: { os?: string; department?: string; owner?: string; criticality?: Severity }) =>
+    request<Asset>(`/assets/${id}`, { method: 'PATCH', body: payload }),
+
+  search: (q: string) => request<SearchResults>('/search', { params: { q } }),
+
+  listNotifications: (params: { unread_only?: boolean } = {}) =>
+    request<{ unread_count: number; notifications: AppNotification[] }>('/notifications', {
+      params: { unread_only: params.unread_only ? 'true' : undefined },
+    }),
+  markNotificationRead: (id: number) => request<AppNotification>(`/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllNotificationsRead: () => request<{ status: string }>('/notifications/read-all', { method: 'POST' }),
 }

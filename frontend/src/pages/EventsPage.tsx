@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { SeverityBadge } from '../components/Badge'
 import type { EventItem } from '../api/types'
@@ -8,8 +8,9 @@ const PAGE_SIZE = 25
 const SEVERITIES = ['low', 'medium', 'high', 'critical']
 
 export function EventsPage() {
-  const [q, setQ] = useState('')
-  const [debouncedQ, setDebouncedQ] = useState('')
+  const [searchParams] = useSearchParams()
+  const [q, setQ] = useState(() => searchParams.get('q') ?? '')
+  const [debouncedQ, setDebouncedQ] = useState(() => searchParams.get('q') ?? '')
   const [severity, setSeverity] = useState('')
   const [offset, setOffset] = useState(0)
   const [events, setEvents] = useState<EventItem[]>([])
@@ -69,6 +70,12 @@ export function EventsPage() {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => api.downloadEventsCsv({ q: debouncedQ || undefined, severity: severity || undefined })}
+            className="rounded-lg border border-slate-700 hover:bg-slate-800 text-sm px-3 py-1.5 transition"
+          >
+            Export CSV
+          </button>
         </div>
       </div>
 

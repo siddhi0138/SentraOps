@@ -43,9 +43,20 @@ export interface IncidentSummary {
   risk_score: number
   risk_level: Severity
   status: IncidentStatus
+  priority: Severity
+  assignee_id: number | null
+  assignee_email: string | null
   affected_hosts: string[]
   affected_users: string[]
   event_count: number
+  created_at: string
+}
+
+export interface IncidentComment {
+  id: number
+  incident_id: number
+  author_email: string | null
+  body: string
   created_at: string
 }
 
@@ -55,4 +66,31 @@ export interface IncidentDetail extends IncidentSummary {
   recommended_actions: string[]
   report: string
   timeline: EventItem[]
+  comments: IncidentComment[]
+}
+
+export interface Asset {
+  id: number
+  host: string
+  first_seen: string
+  last_seen: string
+  event_count: number
+  os: string | null
+  department: string | null
+  owner: string | null
+  criticality: Severity
+}
+
+export interface SearchResults {
+  events: EventItem[]
+  incidents: IncidentSummary[]
+  assets: Asset[]
+}
+
+export interface AppNotification {
+  id: number
+  message: string
+  incident_id: number | null
+  is_read: boolean
+  created_at: string
 }
