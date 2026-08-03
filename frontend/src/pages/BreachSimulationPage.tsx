@@ -52,9 +52,11 @@ export function BreachSimulationPage() {
     setNotConfigured(false)
     try {
       const res = await api.runBasCampaign([...selected])
+      const correlateResult = await api.correlate()
+      await api.syncGraph().catch(() => {})
       setMessage(
         `Ran ${res.ran} technique(s) against a real sandboxed target pod - ${res.ingested} event(s) ingested, ` +
-          `now flowing through real correlation and AI investigation.`
+          `${correlateResult.incidents_created} incident(s) created. Check the Incidents page for AI investigation.`
       )
     } catch (err) {
       if (err instanceof ApiError && err.status === 503) {
