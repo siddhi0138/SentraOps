@@ -1,0 +1,47 @@
+# Grants the backend pod (app/bas.py) permission to create/exec/delete
+# *pods only*, and only inside this release's own namespace - a namespaced
+# Role, never a ClusterRole. This is deliberately the smallest permission
+# set that lets a real Breach & Attack Simulation run against a real,
+# disposable target pod without giving the backend anything resembling
+# cluster-admin or cross-namespace access.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-backend
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-bas-target-manager
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    # Kubernetes' exec subresource is technically a GET that upgrades to a
+    # websocket (kubernetes.stream.stream() -> connect_get_namespaced_pod_exec)
+    # even though semantically it "creates" an exec session - RBAC checks
+    # the literal HTTP verb, so "get" is required here, not "create".
+    # Confirmed live: without "get", a real exec attempt failed with a 403
+    # despite "create" being granted.
+    resources: ["pods/exec"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cybersentinel.fullname" . }}-bas-target-manager
+  labels:
+    {{- include "cybersentinel.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cybersentinel.fullname" . }}-backend
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "cybersentinel.fullname" . }}-bas-target-manager
+  apiGroup: rbac.authorization.k8s.io
