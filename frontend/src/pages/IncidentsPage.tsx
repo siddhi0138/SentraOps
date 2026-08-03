@@ -62,6 +62,12 @@ export function IncidentsPage() {
             <option value="high">High</option>
             <option value="critical">Critical</option>
           </select>
+          <button
+            onClick={() => api.downloadIncidentsCsv({ status: status || undefined, risk_level: riskLevel || undefined })}
+            className="rounded-lg border border-slate-700 hover:bg-slate-800 text-sm px-3 py-1.5 transition"
+          >
+            Export CSV
+          </button>
         </div>
       </div>
 
@@ -74,6 +80,7 @@ export function IncidentsPage() {
                 <th className="px-4 py-2 font-medium">Confidence</th>
                 <th className="px-4 py-2 font-medium">Risk</th>
                 <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">Assignee</th>
                 <th className="px-4 py-2 font-medium">Hosts</th>
                 <th className="px-4 py-2 font-medium">Events</th>
                 <th className="px-4 py-2 font-medium">Created</th>
@@ -94,6 +101,7 @@ export function IncidentsPage() {
                   <td className="px-4 py-2">
                     <StatusBadge status={incident.status} />
                   </td>
+                  <td className="px-4 py-2 text-slate-400">{incident.assignee_email ?? '-'}</td>
                   <td className="px-4 py-2 text-slate-300">{incident.affected_hosts.join(', ')}</td>
                   <td className="px-4 py-2 text-slate-400">{incident.event_count}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400 font-mono text-xs">{incident.created_at}</td>
@@ -101,7 +109,7 @@ export function IncidentsPage() {
               ))}
               {!loading && incidents.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                     No incidents match these filters.
                   </td>
                 </tr>

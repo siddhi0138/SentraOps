@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.db_models import Event, Incident
+from app.db_models import Event, Incident, Notification, User
 
 ALERT_SEVERITIES = {"medium", "high", "critical"}
 SEVERITY_WEIGHTS = {"low": 5, "medium": 15, "high": 25, "critical": 35}
@@ -226,6 +226,7 @@ def run_correlation(db: Session) -> list[Incident]:
             confidence=confidence,
             risk_score=risk_score,
             risk_level=risk_level,
+            priority=risk_level,
             risk_factors=factors,
             threat_intel=threat_intel,
             recommended_actions=actions,
@@ -239,6 +240,7 @@ def run_correlation(db: Session) -> list[Incident]:
         for event in timeline:
             event.incident_id = incident.id
 
+        _notify_responders(db, incident)
         incidents.append(incident)
 
     db.commit()
@@ -246,3 +248,15 @@ def run_correlation(db: Session) -> list[Incident]:
         db.refresh(incident)
 
     return incidents
+
+
+def _notify_responders(db: Session, incident: Incident) -> None:
+    """New incidents page every admin/analyst - there's no assignee yet for a
+    freshly-correlated incident, so everyone who could triage it gets notified."""
+    responders = db.query(User).filter(User.role.in_(("admin", "analyst")), User.is_active.is_(True)).all()
+    for user in responders:
+        db.add(Notification(
+            user_id=user.id,
+            message=f"New {incident.risk_level} incident: {incident.title}",
+            incident_id=incident.id,
+        ))

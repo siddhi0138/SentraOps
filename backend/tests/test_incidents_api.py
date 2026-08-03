@@ -42,7 +42,7 @@ def test_close_incident_updates_status(client, analyst_headers):
     client.post("/correlate", headers=analyst_headers)
     incident_id = client.get("/incidents", headers=analyst_headers).json()["incidents"][0]["id"]
 
-    response = client.patch(f"/incidents/{incident_id}", params={"status": "closed"}, headers=analyst_headers)
+    response = client.patch(f"/incidents/{incident_id}", json={"status": "closed"}, headers=analyst_headers)
     assert response.status_code == 200
     assert response.json()["status"] == "closed"
 
