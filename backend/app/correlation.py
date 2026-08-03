@@ -162,16 +162,27 @@ def _recommend_actions(cluster: list[Event], risk_level: str) -> list[str]:
     hosts = _dedupe_case_insensitive(e.host for e in cluster if e.host)
     ips = sorted({e.source_ip for e in cluster if e.source_ip})
 
+    is_bas = any(et.startswith("bas_") for et in event_types)
+
     if "privilege_escalation" in event_types and users:
         actions.append(f"Disable and audit accounts: {', '.join(users)}")
     if ips:
         actions.append(f"Block source IP(s) at firewall/VPN: {', '.join(ips)}")
-    if "critical" in severities or "process_execution" in event_types:
+    # "high" alongside "critical": BAS-originated events (app/bas.py) top out
+    # at "high" severity (there's no genuinely critical BAS technique), so
+    # this rule never fired for a BAS incident before - only the generic
+    # "open a ticket" line at the bottom did.
+    if "critical" in severities or "high" in severities or "process_execution" in event_types:
         actions.append(f"Isolate host(s) from network: {', '.join(hosts)}")
     if "data_transfer" in event_types:
         actions.append("Force password reset for affected accounts and rotate database credentials")
     if "critical" in severities:
         actions.append("Verify offline/immutable backups before any remediation (ransomware indicator present)")
+    if is_bas:
+        actions.append(
+            "Review the real command output from this technique execution to confirm whether it reflects "
+            "an authorized simulation (Breach & Attack Simulation) or a genuine compromise"
+        )
     if risk_level in ("high", "critical"):
         actions.append("Open incident ticket and notify security team immediately")
 
