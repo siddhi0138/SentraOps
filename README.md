@@ -16,8 +16,8 @@ Milestone 4: Enterprise SOC Platform  - Streaming, graph, RBAC, deployment
 
 Building this in dependency order, since each layer needs the one before it:
 
-- [x] **Step 1 — Ingestion, normalization, persistence** (this step)
-- [ ] Step 2 — Auth + RBAC
+- [x] Step 1 — Ingestion, normalization, persistence
+- [x] **Step 2 — Auth + RBAC** (this step)
 - [ ] Step 3 — Correlation engine (upgrade the legacy `/investigate` demo into a real service over persisted events)
 - [ ] Step 4 — React dashboard + investigation page
 - [ ] Step 5 — Assets, search, incidents workflow, notifications, reports
@@ -60,11 +60,38 @@ to parse — nothing is silently dropped.
 
 ### API
 
-- `POST /ingest/{source_type}` — body `{"logs": [...]}`, one raw item per source format above
-- `POST /ingest/upload?source_type=...` — multipart file upload, CSV or JSON
-- `POST /simulate/{scenario}` — ingests a synthetic attack scenario across multiple real log formats so you can try the platform without real infrastructure (currently: `phishing_ransomware`)
-- `GET /events?q=&event_type=&severity=&username=&host=&source_ip=&limit=&offset=` — search/filter persisted events
-- `POST /investigate` — legacy milestone-1-thin-slice demo (in-memory six-agent pipeline over a fixed sample file); will be replaced by a correlation engine over `/events` in step 3
+- `POST /ingest/{source_type}` — body `{"logs": [...]}`, one raw item per source format above. **Requires admin or analyst role.**
+- `POST /ingest/upload?source_type=...` — multipart file upload, CSV or JSON. **Requires admin or analyst role.**
+- `POST /simulate/{scenario}` — ingests a synthetic attack scenario across multiple real log formats so you can try the platform without real infrastructure (currently: `phishing_ransomware`). **Requires admin or analyst role.**
+- `GET /events?q=&event_type=&severity=&username=&host=&source_ip=&limit=&offset=` — search/filter persisted events. **Requires any authenticated role.**
+- `POST /investigate` — legacy milestone-1-thin-slice demo (in-memory six-agent pipeline over a fixed sample file); will be replaced by a correlation engine over `/events` in step 3. **Requires admin or analyst role.**
+
+### Auth + RBAC
+
+Three roles: `admin`, `analyst`, `viewer`. The first account ever registered
+is auto-promoted to admin (so there's always someone who can manage the
+rest); every later signup defaults to `viewer` until an admin raises their
+role. Roles are looked up fresh from the DB on every request, so a promoted
+user's existing access token works immediately without re-authenticating.
+
+- `POST /auth/register` — body `{"email", "password"}`
+- `POST /auth/login` — body `{"email", "password"}` → `{access_token, refresh_token}`
+- `POST /auth/refresh` — body `{"refresh_token"}` → new token pair
+- `GET /auth/me` — current user (any authenticated role)
+- `GET /users` — list all users. **Admin only.**
+- `PATCH /users/{id}/role` — body `{"role": "admin"|"analyst"|"viewer"}`. **Admin only.**
+
+Authenticated requests send `Authorization: Bearer <access_token>`.
+
+```bash
+curl -X POST localhost:8000/auth/register -d '{"email":"you@corp.com","password":"..."}' -H "Content-Type: application/json"
+TOKEN=$(curl -X POST localhost:8000/auth/login -d '{"email":"you@corp.com","password":"..."}' -H "Content-Type: application/json" | jq -r .access_token)
+curl -X POST localhost:8000/simulate/phishing_ransomware -H "Authorization: Bearer $TOKEN"
+```
+
+Set `JWT_SECRET_KEY` to a real secret in any non-local environment (see
+`.env.example` for how to generate one) — the default is dev-only and
+publicly known.
 
 ## Run it
 
@@ -87,8 +114,10 @@ uvicorn app.main:app --reload
 ### Try it
 
 ```bash
-curl -X POST http://localhost:8000/simulate/phishing_ransomware
-curl "http://localhost:8000/events?severity=critical"
+curl -X POST localhost:8000/auth/register -H "Content-Type: application/json" -d '{"email":"you@corp.com","password":"Secret123!"}'
+TOKEN=$(curl -s -X POST localhost:8000/auth/login -H "Content-Type: application/json" -d '{"email":"you@corp.com","password":"Secret123!"}' | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
+curl -X POST localhost:8000/simulate/phishing_ransomware -H "Authorization: Bearer $TOKEN"
+curl "localhost:8000/events?severity=critical" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Tests
@@ -106,7 +135,8 @@ backend/
     agents/       # milestone-1 thin-slice pipeline (pre-DB, still used by /investigate)
     parsers/       # per-source-format normalizers + registry
     db.py          # SQLAlchemy engine/session (Postgres or SQLite)
-    db_models.py   # RawLog, Event tables
+    db_models.py   # RawLog, Event, User tables
+    auth.py        # password hashing, JWT, RBAC dependencies
     ingestion.py   # parse + persist raw logs
     simulate.py    # synthetic attack scenarios for demoing without real infra
     main.py         # FastAPI app
