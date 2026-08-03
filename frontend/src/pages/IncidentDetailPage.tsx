@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { SeverityBadge, StatusBadge } from '../components/Badge'
-import type { IncidentDetail, IncidentExplanation, Severity, User } from '../api/types'
+import type { IncidentDetail, IncidentExplanation, Severity, SimilarIncident, User } from '../api/types'
 
 const PRIORITIES: Severity[] = ['low', 'medium', 'high', 'critical']
 
@@ -25,6 +25,8 @@ export function IncidentDetailPage() {
   const [explanation, setExplanation] = useState<IncidentExplanation | null>(null)
   const [explaining, setExplaining] = useState(false)
   const [explainError, setExplainError] = useState<string | null>(null)
+  const [audience, setAudience] = useState<'analyst' | 'executive'>('analyst')
+  const [similar, setSimilar] = useState<SimilarIncident[]>([])
 
   const load = useCallback(async () => {
     if (!id) return
@@ -42,6 +44,16 @@ export function IncidentDetailPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    // Free (local embedding search, no LLM call), so safe to auto-fetch
+    // unlike the AI explanation which costs a real Groq call.
+    if (!id) return
+    api
+      .similarIncidents(Number(id))
+      .then((res) => setSimilar(res.matches))
+      .catch(() => setSimilar([]))
+  }, [id])
 
   useEffect(() => {
     if (canAct) void api.listUsers().then(setUsers)
@@ -107,12 +119,14 @@ export function IncidentDetailPage() {
     }
   }
 
-  async function handleExplain() {
+  async function handleExplain(nextAudience?: 'analyst' | 'executive') {
     if (!incident) return
+    const target = nextAudience ?? audience
+    setAudience(target)
     setExplaining(true)
     setExplainError(null)
     try {
-      setExplanation(await api.explainIncident(incident.id))
+      setExplanation(await api.explainIncident(incident.id, target))
     } catch (err) {
       setExplainError(err instanceof ApiError ? err.message : 'Failed to generate AI explanation')
     } finally {
@@ -220,15 +234,33 @@ export function IncidentDetailPage() {
       </div>
 
       <div className="rounded-xl border border-indigo-900/60 bg-indigo-950/20 p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <h2 className="text-sm font-medium text-indigo-300">AI Analysis</h2>
-          <button
-            onClick={handleExplain}
-            disabled={explaining}
-            className="rounded-lg border border-indigo-700 hover:bg-indigo-900/40 disabled:opacity-50 text-xs px-3 py-1.5 transition text-indigo-300"
-          >
-            {explaining ? 'Analyzing...' : explanation ? 'Regenerate' : 'Explain with AI'}
-          </button>
+          <div className="flex items-center gap-2">
+            {explanation && (
+              <div className="flex rounded-lg border border-indigo-800 overflow-hidden text-xs">
+                {(['analyst', 'executive'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => void handleExplain(mode)}
+                    disabled={explaining}
+                    className={`px-2.5 py-1 capitalize transition ${
+                      audience === mode ? 'bg-indigo-700 text-white' : 'text-indigo-300 hover:bg-indigo-900/40'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => void handleExplain()}
+              disabled={explaining}
+              className="rounded-lg border border-indigo-700 hover:bg-indigo-900/40 disabled:opacity-50 text-xs px-3 py-1.5 transition text-indigo-300"
+            >
+              {explaining ? 'Analyzing...' : explanation ? 'Regenerate' : 'Explain with AI'}
+            </button>
+          </div>
         </div>
 
         {explainError && (
@@ -311,6 +343,21 @@ export function IncidentDetailPage() {
             </ul>
           </div>
 
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+            <h2 className="text-sm font-medium text-slate-300 mb-1">Why This Risk Level</h2>
+            <p className="text-xs text-slate-500 mb-3">
+              Computed by the correlation engine's own scoring rules, not an AI guess.
+            </p>
+            <ul className="space-y-1.5 text-sm">
+              {incident.risk_factors.map((factor) => (
+                <li key={factor} className="flex items-start gap-2 text-slate-300">
+                  <span className="text-emerald-400 mt-0.5">&#10003;</span>
+                  <span>{factor}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
           {incident.threat_intel.length > 0 && (
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
               <h2 className="text-sm font-medium text-slate-300 mb-3">Threat Intelligence</h2>
@@ -335,6 +382,29 @@ export function IncidentDetailPage() {
               ))}
             </ul>
           </div>
+
+          {similar.length > 0 && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+              <h2 className="text-sm font-medium text-slate-300 mb-3">Similar Incidents</h2>
+              <div className="space-y-2">
+                {similar.map((match) => (
+                  <Link
+                    key={match.id}
+                    to={`/incidents/${match.id}`}
+                    className="flex items-center justify-between py-1.5 hover:bg-slate-800/40 -mx-2 px-2 rounded transition"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-200 truncate">{match.title}</p>
+                      <p className="text-xs text-slate-500">{match.affected_hosts.join(', ')}</p>
+                    </div>
+                    {match.similarity !== null && (
+                      <span className="text-xs text-slate-400 shrink-0 ml-2">{Math.round(match.similarity * 100)}% similar</span>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

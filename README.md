@@ -7,7 +7,7 @@ solid SOC platform first, AI reasoning layered on top of it later.
 
 ```
 Milestone 1: CyberSentinel Core       - Foundation SOC (no AI)          [DONE]
-Milestone 2: AI Security Analyst      - LLM reasoning over the platform  [IN PROGRESS]
+Milestone 2: AI Security Analyst      - LLM reasoning over the platform  [DONE]
 Milestone 3: Autonomous AI Security Team - Multi-agent investigation
 Milestone 4: Enterprise SOC Platform  - Streaming, graph, RBAC, deployment
 ```
@@ -203,7 +203,7 @@ Set `JWT_SECRET_KEY` to a real secret in any non-local environment (see
 `.env.example` for how to generate one) — the default is dev-only and
 publicly known.
 
-## Milestone 2: AI Security Analyst — in progress
+## Milestone 2: AI Security Analyst — complete
 
 One AI analyst (not a multi-agent swarm — that's Milestone 3), grounded in
 this platform's own data via RAG instead of hallucinating.
@@ -243,9 +243,41 @@ you already have.
   Confidence is the correlation engine's own computed value, not something
   the LLM estimates — keeps it consistent with what the rest of the app
   already shows.
-- [ ] Step 5 — Log explanation, NL→query generator, similar-incident
+- [x] **Step 5 — Log explanation, NL→query generator, similar-incident
   search, threat knowledge Q&A, executive/analyst report modes,
-  confidence/explainability display
+  confidence/explainability display.**
+  - **Explainability**: the Incident Detail page's "Why This Risk Level"
+    card renders `risk_factors` straight from the correlation engine's own
+    scoring rules — no LLM involved, so it can't be wrong about *why* a
+    score was computed, only the correlation logic can.
+  - **Similar Incident Finder** (`GET /incidents/{id}/similar`) — reuses the
+    incident's own already-stored embedding as a semantic search query
+    against every other incident, ranked by cosine similarity. No Groq call
+    — same free local embedding model as steps 1-2, so it's instant and
+    costs nothing to load on every incident page.
+  - **Executive vs analyst report mode** — `/incidents/{id}/explain` takes
+    an `audience=analyst|executive` query param that swaps the system
+    prompt's tone: analyst mode cites hosts/accounts/event IDs directly,
+    executive mode translates the same incident into plain-language
+    business risk with no jargon. Same underlying report, two readings of
+    it, toggle-able on the Incident Detail page without leaving it.
+  - **AI event/log explanation** (`GET /events/{id}/explain`) — one Groq
+    call per event, on demand (an "Explain" button per row on the Events
+    table), returns a plain-language explanation, a suspicious/benign
+    judgment, and a recommended next step. Deliberately scoped to a single
+    event in isolation — it doesn't know about other events, so "suspicious"
+    here means "worth a second look," not "confirmed malicious."
+  - **Natural language search** (`POST /query`) — translates a free-text
+    question into the *same* structured filter fields `/events` already
+    accepts (`event_type`, `severity`, `username`, `host`, `source_ip`,
+    `q`), grounded with the platform's actual known `event_type`/`severity`
+    values so the model can't hallucinate a filter value that would just
+    silently match nothing. **Deliberately not SQL/KQL/Elastic DSL
+    generation** — the LLM only ever picks from a fixed set of fields, so
+    there's no query-language injection surface no matter what the question
+    contains. The response echoes back the interpreted filters (`filters`
+    key) so the analyst can see exactly what the AI understood before
+    trusting the results.
 
 **Setup:** get a free key at console.groq.com → API Keys, then set
 `GROQ_API_KEY` in `.env` (repo root, for Docker) and `backend/.env` (for
@@ -275,11 +307,20 @@ must be the `pgvector/pgvector:pg16` image (already the default in
 - `POST /chat` — body `{"question"}` → `{question, answer, sources}`.
   `sources` is the same shape `/rag/search` returns, so the UI can link
   straight back to the incidents/events that grounded the answer.
-- `GET /incidents/{id}/explain` → `{explanation, timeline_narrative,
-  attack_type, affected_user, affected_assets, impact, confidence}`.
+- `GET /incidents/{id}/explain?audience=analyst|executive` → `{explanation,
+  timeline_narrative, attack_type, affected_user, affected_assets, impact,
+  confidence}`. `audience` defaults to `analyst`.
+- `GET /incidents/{id}/similar?k=5` → `{incident_id, matches}`, each match
+  the usual incident summary plus a `similarity` score. No Groq call.
+- `GET /events/{id}/explain` → `{explanation, is_suspicious,
+  recommended_action}`.
+- `POST /query` — body `{"question"}` → `{question, filters, total,
+  events}`. `filters` is the interpreted `event_type`/`severity`/`username`/
+  `host`/`source_ip`/`q` — the same shape `/events` accepts.
 
-Both return `503` if `GROQ_API_KEY` isn't set, `502` if Groq itself fails
-(rate limit, timeout, ...). **Require any authenticated role.**
+All return `503` if `GROQ_API_KEY` isn't set, `502` if Groq itself fails
+(rate limit, timeout, ...) — except `/incidents/{id}/similar`, which needs
+no LLM and can't fail that way. **Require any authenticated role.**
 
 ## Run it
 

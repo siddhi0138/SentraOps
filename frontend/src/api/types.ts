@@ -126,3 +126,29 @@ export interface IncidentExplanation {
   impact: string
   confidence: number
 }
+
+export interface SimilarIncident extends IncidentSummary {
+  similarity: number | null
+}
+
+export interface EventExplanation {
+  explanation: string
+  is_suspicious: boolean
+  recommended_action: string
+}
+
+export interface QueryFilters {
+  event_type: string | null
+  severity: Severity | null
+  username: string | null
+  host: string | null
+  source_ip: string | null
+  q: string | null
+}
+
+export interface QueryResult {
+  question: string
+  filters: QueryFilters
+  total: number
+  events: EventItem[]
+}

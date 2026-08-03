@@ -2,12 +2,15 @@ import type {
   AppNotification,
   Asset,
   ChatResponse,
+  EventExplanation,
   EventItem,
   IncidentComment,
   IncidentDetail,
   IncidentExplanation,
   IncidentStatus,
   IncidentSummary,
+  QueryResult,
+  SimilarIncident,
   Role,
   SearchResults,
   Severity,
@@ -156,6 +159,8 @@ export const api = {
   }) => request<{ total: number; events: EventItem[] }>('/events', { params }),
   downloadEventsCsv: (params: { q?: string; event_type?: string; severity?: string }) =>
     downloadFile('/events/export.csv', params, 'events.csv'),
+  explainEvent: (id: number) => request<EventExplanation>(`/events/${id}/explain`),
+  naturalLanguageQuery: (question: string) => request<QueryResult>('/query', { method: 'POST', body: { question } }),
 
   simulate: (scenario: string) => request<unknown>(`/simulate/${scenario}`, { method: 'POST' }),
   correlate: () => request<{ incidents_created: number }>('/correlate', { method: 'POST' }),
@@ -166,7 +171,9 @@ export const api = {
     downloadFile('/incidents/export.csv', params, 'incidents.csv'),
   getIncident: (id: number) => request<IncidentDetail>(`/incidents/${id}`),
   downloadIncidentReport: (id: number) => downloadFile(`/incidents/${id}/report.md`, undefined, `incident-${id}-report.md`),
-  explainIncident: (id: number) => request<IncidentExplanation>(`/incidents/${id}/explain`),
+  explainIncident: (id: number, audience: 'analyst' | 'executive' = 'analyst') =>
+    request<IncidentExplanation>(`/incidents/${id}/explain`, { params: { audience } }),
+  similarIncidents: (id: number) => request<{ incident_id: number; matches: SimilarIncident[] }>(`/incidents/${id}/similar`),
   updateIncident: (id: number, payload: { status?: IncidentStatus; priority?: Severity; assignee_id?: number | null }) =>
     request<IncidentDetail>(`/incidents/${id}`, { method: 'PATCH', body: payload }),
   addComment: (id: number, body: string) => request<IncidentComment>(`/incidents/${id}/comments`, { method: 'POST', body: { body } }),

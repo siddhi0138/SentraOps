@@ -35,6 +35,23 @@ def test_explain_incident_returns_structured_explanation(client, analyst_headers
     call_args = mock_explain.call_args
     assert "Incident Report" in call_args.args[0]
     assert call_args.args[1] == 96
+    assert call_args.kwargs["audience"] == "analyst"  # default
+
+
+def test_explain_incident_passes_executive_audience(client, analyst_headers):
+    incident_id = _create_one_incident(client, analyst_headers)
+
+    with patch("app.main.explain_incident", return_value={**FAKE_EXPLANATION, "confidence": 96}) as mock_explain:
+        response = client.get(f"/incidents/{incident_id}/explain", params={"audience": "executive"}, headers=analyst_headers)
+
+    assert response.status_code == 200
+    assert mock_explain.call_args.kwargs["audience"] == "executive"
+
+
+def test_explain_rejects_invalid_audience(client, analyst_headers):
+    incident_id = _create_one_incident(client, analyst_headers)
+    response = client.get(f"/incidents/{incident_id}/explain", params={"audience": "hacker"}, headers=analyst_headers)
+    assert response.status_code == 422
 
 
 def test_explain_unknown_incident_returns_404(client, analyst_headers):
