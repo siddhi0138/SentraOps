@@ -9,7 +9,7 @@ from typing import Any, Literal
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -497,6 +497,35 @@ def update_asset(
     db.commit()
     db.refresh(asset)
     return asset.to_dict()
+
+
+@app.get("/stats")
+def get_stats(
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_roles(Role.admin, Role.analyst, Role.viewer)),
+) -> dict:
+    """Dashboard aggregates computed over the whole table via SQL
+    COUNT/GROUP BY, not a capped list fetched and counted client-side - the
+    dashboard used to sample only the 500 most recent events for its
+    severity chart, which quietly went inaccurate past that many rows."""
+    total_events = db.query(Event).count()
+    total_incidents = db.query(Incident).count()
+    open_incidents = db.query(Incident).filter(Incident.status == "open").count()
+    critical_incidents = db.query(Incident).filter(Incident.risk_level == "critical").count()
+
+    severity_counts = dict(db.query(Event.severity, func.count(Event.id)).group_by(Event.severity).all())
+    severity_distribution = {s: severity_counts.get(s, 0) for s in ("low", "medium", "high", "critical")}
+
+    recent_incidents = db.query(Incident).order_by(Incident.created_at.desc()).limit(5).all()
+
+    return {
+        "total_events": total_events,
+        "total_incidents": total_incidents,
+        "open_incidents": open_incidents,
+        "critical_incidents": critical_incidents,
+        "severity_distribution": severity_distribution,
+        "recent_incidents": [i.to_summary_dict() for i in recent_incidents],
+    }
 
 
 @app.get("/search")

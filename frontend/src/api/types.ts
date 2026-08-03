@@ -94,3 +94,12 @@ export interface AppNotification {
   is_read: boolean
   created_at: string
 }
+
+export interface Stats {
+  total_events: number
+  total_incidents: number
+  open_incidents: number
+  critical_incidents: number
+  severity_distribution: Record<Severity, number>
+  recent_incidents: IncidentSummary[]
+}

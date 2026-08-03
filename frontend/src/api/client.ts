@@ -9,6 +9,7 @@ import type {
   Role,
   SearchResults,
   Severity,
+  Stats,
   TokenPair,
   User,
 } from './types'
@@ -173,6 +174,8 @@ export const api = {
     request<Asset>(`/assets/${id}`, { method: 'PATCH', body: payload }),
 
   search: (q: string) => request<SearchResults>('/search', { params: { q } }),
+
+  getStats: () => request<Stats>('/stats'),
 
   listNotifications: (params: { unread_only?: boolean } = {}) =>
     request<{ unread_count: number; notifications: AppNotification[] }>('/notifications', {

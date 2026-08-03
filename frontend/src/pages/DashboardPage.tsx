@@ -5,7 +5,7 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { SEVERITY_COLORS, SeverityBadge, StatusBadge } from '../components/Badge'
 import { StatCard } from '../components/StatCard'
-import type { EventItem, IncidentSummary, Severity } from '../api/types'
+import type { Severity, Stats } from '../api/types'
 
 const SEVERITY_ORDER: Severity[] = ['low', 'medium', 'high', 'critical']
 
@@ -13,9 +13,7 @@ export function DashboardPage() {
   const { user } = useAuth()
   const canAct = user?.role === 'admin' || user?.role === 'analyst'
 
-  const [events, setEvents] = useState<EventItem[]>([])
-  const [totalEvents, setTotalEvents] = useState(0)
-  const [incidents, setIncidents] = useState<IncidentSummary[]>([])
+  const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -24,13 +22,7 @@ export function DashboardPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [eventsRes, incidentsRes] = await Promise.all([
-        api.listEvents({ limit: 500 }),
-        api.listIncidents({ limit: 500 }),
-      ])
-      setEvents(eventsRes.events)
-      setTotalEvents(eventsRes.total)
-      setIncidents(incidentsRes.incidents)
+      setStats(await api.getStats())
     } finally {
       setLoading(false)
     }
@@ -56,20 +48,14 @@ export function DashboardPage() {
     }
   }
 
-  const severityCounts = SEVERITY_ORDER.map((severity) => ({
-    severity,
-    count: events.filter((e) => e.severity === severity).length,
-  }))
-
-  const openIncidents = incidents.filter((i) => i.status === 'open')
-  const criticalIncidents = incidents.filter((i) => i.risk_level === 'critical')
-  const recentIncidents = [...incidents]
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, 5)
-
-  if (loading) {
+  if (loading || !stats) {
     return <div className="text-slate-400">Loading dashboard...</div>
   }
+
+  const severityCounts = SEVERITY_ORDER.map((severity) => ({
+    severity,
+    count: stats.severity_distribution[severity] ?? 0,
+  }))
 
   return (
     <div className="space-y-6">
@@ -94,14 +80,14 @@ export function DashboardPage() {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Events" value={totalEvents} />
-        <StatCard label="Open Incidents" value={openIncidents.length} accent={openIncidents.length > 0 ? 'text-blue-400' : undefined} />
+        <StatCard label="Total Events" value={stats.total_events} />
+        <StatCard label="Open Incidents" value={stats.open_incidents} accent={stats.open_incidents > 0 ? 'text-blue-400' : undefined} />
         <StatCard
           label="Critical Incidents"
-          value={criticalIncidents.length}
-          accent={criticalIncidents.length > 0 ? 'text-red-400' : undefined}
+          value={stats.critical_incidents}
+          accent={stats.critical_incidents > 0 ? 'text-red-400' : undefined}
         />
-        <StatCard label="Total Incidents" value={incidents.length} />
+        <StatCard label="Total Incidents" value={stats.total_incidents} />
       </div>
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
@@ -127,13 +113,13 @@ export function DashboardPage() {
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
         <h2 className="text-sm font-medium text-slate-300 mb-3">Recent Incidents</h2>
-        {recentIncidents.length === 0 ? (
+        {stats.recent_incidents.length === 0 ? (
           <p className="text-sm text-slate-500">
             No incidents yet.{canAct ? ' Try "Simulate attack + correlate" above.' : ''}
           </p>
         ) : (
           <div className="divide-y divide-slate-800">
-            {recentIncidents.map((incident) => (
+            {stats.recent_incidents.map((incident) => (
               <Link
                 key={incident.id}
                 to={`/incidents/${incident.id}`}
