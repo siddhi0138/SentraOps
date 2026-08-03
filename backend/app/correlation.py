@@ -287,6 +287,7 @@ def run_correlation(db: Session, organization_id: int) -> list[Incident]:
 
         store_embedding(db, organization_id, "incident", incident.id, f"{title}\n\n{report}")
         _notify_responders(db, organization_id, incident)
+        _notify_slack(db, incident)
         incidents.append(incident)
 
     # Release the claim on any candidate that didn't end up matching a
@@ -320,3 +321,17 @@ def _notify_responders(db: Session, organization_id: int, incident: Incident) ->
             message=f"New {incident.risk_level} incident: {incident.title}",
             incident_id=incident.id,
         ))
+
+
+def _notify_slack(db: Session, incident: Incident) -> None:
+    # Local import: app.slack_bot pulls in app.tasks -> app.agents.runner,
+    # and correlation.py must stay importable standalone (tests import it
+    # directly) without dragging in the whole Celery/agents chain at module
+    # load time - see app/slack_bot.py's own docstring for why this never
+    # raises regardless.
+    from app.slack_bot import notify_new_incident
+
+    try:
+        notify_new_incident(db, incident)
+    except Exception:
+        pass
