@@ -1,7 +1,16 @@
 import os
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+# Docker passes real env vars directly (load_dotenv default is non-
+# overriding, so this is a no-op there). Local `uvicorn` runs need this to
+# pick up backend/.env - db.py is imported before any other module reads
+# an env var (e.g. auth.py imports `from app.db import get_db` before its
+# own os.environ.get("JWT_SECRET_KEY") line), so this has to run here,
+# first, not in main.py.
+load_dotenv()
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./cybersentinel.db")
 

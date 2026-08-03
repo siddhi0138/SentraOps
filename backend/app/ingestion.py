@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db_models import Asset, Event, RawLog
 from app.parsers import get_parser
+from app.rag import store_embedding
 
 
 def _serialize_raw(raw: Any) -> str:
@@ -54,10 +55,19 @@ def _upsert_asset(db: Session, host: str, timestamp: datetime) -> None:
         _apply_sighting(asset, timestamp)
 
 
+def _event_embedding_text(event: Event) -> str:
+    return f"[{event.host}] {event.username or 'unknown'} - {event.event_type} ({event.severity}): {event.message}"
+
+
 def ingest(db: Session, source_type: str, raw_items: list[Any]) -> tuple[list[Event], int]:
     """Parses+normalizes raw_items via the source_type's parser and persists both
     the raw payload (for audit/replay) and the normalized event. Unparseable
-    items are skipped rather than failing the whole batch."""
+    items are skipped rather than failing the whole batch.
+
+    Each event is also embedded for RAG search (app/rag.py). That's a
+    synchronous CPU-bound call per event - fine at demo/dev ingestion
+    volumes; a production-scale ingest path would move this to a background
+    job instead of doing it inline per request."""
     parser = get_parser(source_type)
     events: list[Event] = []
     skipped = 0
@@ -75,8 +85,10 @@ def ingest(db: Session, source_type: str, raw_items: list[Any]) -> tuple[list[Ev
 
         event = Event(raw_log_id=raw_log.id, source_type=source_type, **normalized)
         db.add(event)
+        db.flush()
         events.append(event)
         _upsert_asset(db, normalized["host"], normalized["timestamp"])
+        store_embedding(db, "event", event.id, _event_embedding_text(event))
 
     db.commit()
     for event in events:

@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.db_models import Event, Incident, Notification, User
+from app.rag import store_embedding
 
 ALERT_SEVERITIES = {"medium", "high", "critical"}
 SEVERITY_WEIGHTS = {"low": 5, "medium": 15, "high": 25, "critical": 35}
@@ -270,6 +271,7 @@ def run_correlation(db: Session) -> list[Incident]:
         for event in timeline:
             event.incident_id = incident.id
 
+        store_embedding(db, "incident", incident.id, f"{title}\n\n{report}")
         _notify_responders(db, incident)
         incidents.append(incident)
 

@@ -1,13 +1,54 @@
+import json
 from datetime import datetime, timezone
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import TypeDecorator
 
 from app.db import Base
+
+EMBEDDING_DIM = 384  # all-MiniLM-L6-v2's output size (see app/embeddings.py)
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class EmbeddingVector(TypeDecorator):
+    """Native pgvector column on Postgres (indexed ANN search via
+    cosine_distance()). SQLite has no vector extension, so dev mode falls
+    back to storing the vector as JSON text; app/rag.py does a brute-force
+    cosine similarity scan in Python for that dialect instead - fine at
+    dev/demo scale, not meant to scale on SQLite."""
+
+    impl = Text
+    cache_ok = True
+    # TypeDecorator doesn't automatically forward the wrapped type's special
+    # comparator methods (cosine_distance() etc. aren't standard SQL
+    # operators SQLAlchemy knows generically) - has to be wired explicitly,
+    # or Embedding.vector.cosine_distance(...) raises AttributeError. Only
+    # matters on Postgres; SQLite never calls it (see app/rag.py).
+    comparator_factory = Vector.comparator_factory
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Vector(EMBEDDING_DIM))
+        return dialect.type_descriptor(Text())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return value
+        return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return list(value)
+        return json.loads(value)
 
 
 class User(Base):
@@ -212,3 +253,20 @@ class Notification(Base):
             "is_read": self.is_read,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class Embedding(Base):
+    """A vector-searchable chunk of text plus a pointer back to what it came
+    from. `content_type` + `content_id` is a loose reference (not a real FK)
+    since it points at different tables depending on the type - kept generic
+    so knowledge-base articles, MITRE entries, etc. can reuse this table
+    later without a schema change."""
+
+    __tablename__ = "embeddings"
+
+    id = Column(Integer, primary_key=True)
+    content_type = Column(String(50), nullable=False, index=True)  # "event" | "incident"
+    content_id = Column(Integer, nullable=True, index=True)
+    text = Column(Text, nullable=False)
+    vector = Column(EmbeddingVector, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
