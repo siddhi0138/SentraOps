@@ -64,7 +64,7 @@ def test_api_key_authenticates_as_its_acting_user(client, admin_headers):
 
     response = client.get("/auth/me", headers={"X-API-Key": raw_key})
     assert response.status_code == 200
-    assert response.json()["role"] == "admin"  # acts as the creating admin by default
+    assert response.json()["role"] == "owner"  # acts as the creating owner by default
 
 
 def test_api_key_acting_as_viewer_cannot_do_admin_actions(client, admin_headers, viewer_headers):
@@ -72,7 +72,7 @@ def test_api_key_acting_as_viewer_cannot_do_admin_actions(client, admin_headers,
     created = client.post("/api-keys", json={"name": "Viewer key", "user_id": viewer_id}, headers=admin_headers).json()
 
     response = client.get("/auth/me", headers={"X-API-Key": created["key"]})
-    assert response.json()["role"] == "viewer"
+    assert response.json()["role"] == "auditor"
 
     assert client.post("/api-keys", json={"name": "x"}, headers={"X-API-Key": created["key"]}).status_code == 403
 

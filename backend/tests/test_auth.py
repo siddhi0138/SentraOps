@@ -1,11 +1,11 @@
-def test_creating_organization_makes_first_user_admin(client):
+def test_creating_organization_makes_first_user_owner(client):
     response = client.post(
         "/organizations",
         json={"organization_name": "Acme Corp", "email": "first@example.com", "password": "Secret123!"},
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["role"] == "admin"
+    assert body["role"] == "owner"
     assert body["organization_name"] == "Acme Corp"
     assert body["organization_slug"]
 
@@ -21,14 +21,14 @@ def test_organization_slug_is_url_safe_and_deduped_on_collision(client):
     assert second.json()["organization_slug"] == "acme-corp-2"
 
 
-def test_joining_existing_organization_defaults_to_viewer(client, test_org):
+def test_joining_existing_organization_defaults_to_auditor(client, test_org):
     org_slug, _admin = test_org
     response = client.post(
         "/auth/register",
         json={"email": "second@example.com", "password": "Secret123!", "organization_slug": org_slug},
     )
     assert response.status_code == 200
-    assert response.json()["role"] == "viewer"
+    assert response.json()["role"] == "auditor"
 
 
 def test_registering_with_unknown_organization_slug_returns_404(client):
@@ -126,7 +126,7 @@ def test_admin_can_list_and_promote_users(client, test_org, register_and_login):
     register_and_login("newbie@example.com", org_slug)
     users = client.get("/users", headers=admin_headers).json()
     newbie = next(u for u in users if u["email"] == "newbie@example.com")
-    assert newbie["role"] == "viewer"
+    assert newbie["role"] == "auditor"
 
     response = client.patch(
         f"/users/{newbie['id']}/role", json={"role": "analyst"}, headers=admin_headers
@@ -140,7 +140,7 @@ def test_non_admin_cannot_list_users(client, viewer_headers):
     assert response.status_code == 403
 
 
-def test_promoted_viewer_gains_analyst_access_without_new_login(client, test_org, register_and_login):
+def test_promoted_auditor_gains_analyst_access_without_new_login(client, test_org, register_and_login):
     org_slug, admin_headers = test_org
     token = register_and_login("promoteme@example.com", org_slug)
     headers = {"Authorization": f"Bearer {token}"}
@@ -163,7 +163,7 @@ def test_admin_cannot_promote_user_in_a_different_organization(client, test_org,
     other_admin_id = other_users[0]["id"]
 
     response = client.patch(
-        f"/users/{other_admin_id}/role", json={"role": "viewer"}, headers=admin_headers
+        f"/users/{other_admin_id}/role", json={"role": "auditor"}, headers=admin_headers
     )
     assert response.status_code == 404
 
@@ -175,3 +175,33 @@ def test_admin_cannot_see_users_from_a_different_organization(client, test_org, 
 
     my_users = client.get("/users", headers=admin_headers).json()
     assert other_email not in [u["email"] for u in my_users]
+
+
+def test_admin_cannot_grant_owner_role(client, test_org, register_and_login):
+    """Admin has the same day-to-day permissions as Owner, but must not be
+    able to self-promote (or promote anyone else) to the org's top role -
+    only an existing Owner can do that."""
+    org_slug, owner_headers = test_org
+    admin_token = register_and_login("wannabe-admin@example.com", org_slug)
+    admin_id = next(
+        u["id"] for u in client.get("/users", headers=owner_headers).json() if u["email"] == "wannabe-admin@example.com"
+    )
+    client.patch(f"/users/{admin_id}/role", json={"role": "admin"}, headers=owner_headers)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    register_and_login("target@example.com", org_slug)
+    target_id = next(u["id"] for u in client.get("/users", headers=owner_headers).json() if u["email"] == "target@example.com")
+
+    response = client.patch(f"/users/{target_id}/role", json={"role": "owner"}, headers=admin_headers)
+    assert response.status_code == 403
+
+
+def test_owner_can_grant_and_revoke_owner_role(client, test_org, register_and_login):
+    org_slug, owner_headers = test_org
+    register_and_login("newowner@example.com", org_slug)
+    user_id = next(
+        u["id"] for u in client.get("/users", headers=owner_headers).json() if u["email"] == "newowner@example.com"
+    )
+    response = client.patch(f"/users/{user_id}/role", json={"role": "owner"}, headers=owner_headers)
+    assert response.status_code == 200
+    assert response.json()["role"] == "owner"

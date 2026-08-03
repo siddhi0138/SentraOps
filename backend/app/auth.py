@@ -25,9 +25,21 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 class Role(str, Enum):
+    # Owner: one per org in practice (the creator) - everything Admin can
+    # do, plus the only role allowed to grant/revoke Owner itself (see
+    # update_user_role in main.py). Admin: same operational access as
+    # Owner today (no billing/SSO/org-deletion features exist yet to
+    # actually distinguish them further). SOC Manager: same day-to-day
+    # incident/investigation access as Analyst - a real permission split
+    # between the two would need a "manage/assign analysts" feature this
+    # project doesn't have yet. Executive/Auditor: read-only everywhere,
+    # can never approve actions, change status, or configure anything.
+    owner = "owner"
     admin = "admin"
+    soc_manager = "soc_manager"
     analyst = "analyst"
-    viewer = "viewer"
+    executive = "executive"
+    auditor = "auditor"
 
 
 class UserCreate(BaseModel):
