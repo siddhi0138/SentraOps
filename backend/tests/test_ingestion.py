@@ -2,8 +2,8 @@ from app.db_models import Event, RawLog
 from app.ingestion import ingest
 
 
-def test_ingest_persists_raw_log_and_normalized_event(db_session):
-    events, skipped = ingest(db_session, "generic", [{
+def test_ingest_persists_raw_log_and_normalized_event(db_session, org_id):
+    events, skipped = ingest(db_session, org_id, "generic", [{
         "timestamp": "2026-07-24T09:14:02",
         "host": "FINANCE-PC-21",
         "user": "j.mehta",
@@ -21,12 +21,12 @@ def test_ingest_persists_raw_log_and_normalized_event(db_session):
     assert event.source_type == "generic"
 
 
-def test_ingest_skips_unparseable_items_without_failing_batch(db_session):
+def test_ingest_skips_unparseable_items_without_failing_batch(db_session, org_id):
     lines = [
         "Jul 24 09:16:40 db-server-03 sshd[1122]: Failed password for invalid user admin from 185.220.101.45 port 51824 ssh2",
         "this line is garbage and cannot be parsed",
     ]
-    events, skipped = ingest(db_session, "syslog", lines)
+    events, skipped = ingest(db_session, org_id, "syslog", lines)
 
     assert len(events) == 1
     assert skipped == 1

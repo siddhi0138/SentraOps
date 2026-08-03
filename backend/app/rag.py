@@ -4,10 +4,15 @@ from app.db_models import Embedding
 from app.embeddings import embed_text
 
 
-def store_embedding(db: Session, content_type: str, content_id: int | None, text: str) -> None:
+def store_embedding(db: Session, organization_id: int, content_type: str, content_id: int | None, text: str) -> None:
     if not text or not text.strip():
         return
-    db.add(Embedding(content_type=content_type, content_id=content_id, text=text, vector=embed_text(text)))
+    db.add(
+        Embedding(
+            organization_id=organization_id, content_type=content_type, content_id=content_id, text=text,
+            vector=embed_text(text),
+        )
+    )
 
 
 def _to_result(row: Embedding, score: float | None = None) -> dict:
@@ -19,14 +24,19 @@ def _to_result(row: Embedding, score: float | None = None) -> dict:
     }
 
 
-def search(db: Session, query: str, content_type: str | None = None, k: int = 5) -> list[dict]:
+def search(db: Session, organization_id: int, query: str, content_type: str | None = None, k: int = 5) -> list[dict]:
     """Semantic search over stored embeddings. Postgres uses pgvector's
     indexed cosine_distance() operator; SQLite (dev only) falls back to a
     brute-force cosine similarity scan in Python - fine for the row counts
-    a dev/demo database has, not meant to scale."""
+    a dev/demo database has, not meant to scale.
+
+    Always scoped to one organization - this is the RAG grounding for
+    chat/incident-explain/similar-incidents, so an unscoped query here
+    would leak another tenant's event/incident text into an answer, not
+    just their metadata."""
     query_vector = embed_text(query)
 
-    base_query = db.query(Embedding)
+    base_query = db.query(Embedding).filter(Embedding.organization_id == organization_id)
     if content_type:
         base_query = base_query.filter(Embedding.content_type == content_type)
 

@@ -2,8 +2,8 @@ from app.db_models import Asset
 from app.ingestion import ingest
 
 
-def test_ingestion_creates_and_updates_asset(db_session):
-    ingest(db_session, "generic", [
+def test_ingestion_creates_and_updates_asset(db_session, org_id):
+    ingest(db_session, org_id, "generic", [
         {"timestamp": "2026-07-24T09:00:00", "host": "HOST-A", "event_type": "login_success", "severity": "low", "message": "m1"},
         {"timestamp": "2026-07-24T10:00:00", "host": "host-a", "event_type": "login_success", "severity": "low", "message": "m2"},
     ])

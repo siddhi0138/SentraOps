@@ -5,13 +5,23 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Query, sessionmaker
 
 from app.db import run_migrations
-from app.db_models import Asset
+from app.db_models import Asset, Organization
 from app.ingestion import _upsert_asset
 
 
 def _make_session(db_path):
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     return sessionmaker(bind=engine)()
+
+
+def _seed_org(db_path) -> int:
+    session = _make_session(db_path)
+    org = Organization(name="Test Org", slug="test-org")
+    session.add(org)
+    session.commit()
+    org_id = org.id
+    session.close()
+    return org_id
 
 
 def test_upsert_asset_recovers_when_a_concurrent_insert_wins_the_race(tmp_path):
@@ -31,12 +41,13 @@ def test_upsert_asset_recovers_when_a_concurrent_insert_wins_the_race(tmp_path):
     creating a duplicate."""
     db_path = tmp_path / "asset_race.db"
     run_migrations(f"sqlite:///{db_path}")
+    org_id = _seed_org(db_path)
 
     winner_session = _make_session(db_path)
     timestamp = datetime(2026, 7, 24, 9, 0, 0)
 
     # The "other" concurrent request already won and committed.
-    _upsert_asset(winner_session, "FINANCE-PC-21", timestamp)
+    _upsert_asset(winner_session, org_id, "FINANCE-PC-21", timestamp)
     winner_session.commit()
     winner_session.close()
 
@@ -51,7 +62,7 @@ def test_upsert_asset_recovers_when_a_concurrent_insert_wins_the_race(tmp_path):
         return original_first(self)
 
     with patch.object(Query, "first", stale_first):
-        _upsert_asset(loser_session, "finance-pc-21", timestamp)  # must not raise
+        _upsert_asset(loser_session, org_id, "finance-pc-21", timestamp)  # must not raise
     loser_session.commit()
     loser_session.close()
 
@@ -67,15 +78,16 @@ def test_upsert_asset_normal_path_still_dedupes_across_sessions(tmp_path):
     sessions for the same host (different casing) never create two rows."""
     db_path = tmp_path / "asset_sequential.db"
     run_migrations(f"sqlite:///{db_path}")
+    org_id = _seed_org(db_path)
     timestamp = datetime(2026, 7, 24, 9, 0, 0)
 
     session_a = _make_session(db_path)
-    _upsert_asset(session_a, "FINANCE-PC-21", timestamp)
+    _upsert_asset(session_a, org_id, "FINANCE-PC-21", timestamp)
     session_a.commit()
     session_a.close()
 
     session_b = _make_session(db_path)
-    _upsert_asset(session_b, "finance-pc-21", timestamp)
+    _upsert_asset(session_b, org_id, "finance-pc-21", timestamp)
     session_b.commit()
     session_b.close()
 

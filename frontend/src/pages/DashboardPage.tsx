@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Link } from 'react-router-dom'
+import { AlertTriangle, ListChecks, ShieldAlert, Sparkles, Zap } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { SEVERITY_COLORS, SeverityBadge, StatusBadge } from '../components/Badge'
 import { StatCard } from '../components/StatCard'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import type { Severity, Stats } from '../api/types'
 
 const SEVERITY_ORDER: Severity[] = ['low', 'medium', 'high', 'critical']
@@ -49,7 +53,7 @@ export function DashboardPage() {
   }
 
   if (loading || !stats) {
-    return <div className="text-slate-400">Loading dashboard...</div>
+    return <div className="text-muted-foreground text-sm">Loading dashboard…</div>
   }
 
   const severityCounts = SEVERITY_ORDER.map((severity) => ({
@@ -59,85 +63,107 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-100">Security Overview</h1>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-foreground">Security Overview</h1>
+          <p className="text-sm text-muted-foreground">Live telemetry across every ingested source.</p>
+        </div>
         {canAct && (
-          <button
-            onClick={handleSimulateAndCorrelate}
-            disabled={working}
-            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
-          >
-            {working ? 'Running...' : 'Simulate attack + correlate'}
-          </button>
+          <Button onClick={handleSimulateAndCorrelate} disabled={working}>
+            <Zap className="h-4 w-4" />
+            {working ? 'Running…' : 'Simulate attack + correlate'}
+          </Button>
         )}
       </div>
 
       {actionMessage && (
-        <p className="text-sm text-emerald-400 bg-emerald-950/40 border border-emerald-900 rounded-lg px-3 py-2">{actionMessage}</p>
+        <Alert className="border-severity-low/30 bg-severity-low/10 text-severity-low">
+          <Sparkles className="h-4 w-4" />
+          <AlertDescription className="text-severity-low">{actionMessage}</AlertDescription>
+        </Alert>
       )}
       {actionError && (
-        <p className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-lg px-3 py-2">{actionError}</p>
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Events" value={stats.total_events} />
-        <StatCard label="Open Incidents" value={stats.open_incidents} accent={stats.open_incidents > 0 ? 'text-blue-400' : undefined} />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <StatCard label="Total Events" value={stats.total_events} icon={ListChecks} />
+        <StatCard
+          label="Open Incidents"
+          value={stats.open_incidents}
+          accent={stats.open_incidents > 0 ? 'text-primary' : undefined}
+          icon={ShieldAlert}
+        />
         <StatCard
           label="Critical Incidents"
           value={stats.critical_incidents}
-          accent={stats.critical_incidents > 0 ? 'text-red-400' : undefined}
+          accent={stats.critical_incidents > 0 ? 'text-severity-critical' : undefined}
+          icon={AlertTriangle}
         />
-        <StatCard label="Total Incidents" value={stats.total_incidents} />
+        <StatCard label="Total Incidents" value={stats.total_incidents} icon={Sparkles} />
       </div>
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-        <h2 className="text-sm font-medium text-slate-300 mb-4">Event Severity Distribution</h2>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={severityCounts} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2c2c2a" vertical={false} />
-            <XAxis dataKey="severity" tick={{ fill: '#898781', fontSize: 12 }} tickLine={false} axisLine={{ stroke: '#383835' }} />
-            <YAxis allowDecimals={false} tick={{ fill: '#898781', fontSize: 12 }} tickLine={false} axisLine={{ stroke: '#383835' }} />
-            <Tooltip
-              cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-              contentStyle={{ background: '#1a1a19', border: '1px solid #383835', borderRadius: 8, fontSize: 12 }}
-              labelStyle={{ color: '#ffffff', textTransform: 'capitalize' }}
-            />
-            <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64}>
-              {severityCounts.map((entry) => (
-                <Cell key={entry.severity} fill={SEVERITY_COLORS[entry.severity].bg} />
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            Event Severity Distribution
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={severityCounts} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="severity" tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
+              <YAxis allowDecimals={false} tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
+              <Tooltip
+                cursor={{ fill: 'var(--muted)' }}
+                contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: 'var(--foreground)', textTransform: 'capitalize' }}
+              />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64}>
+                {severityCounts.map((entry) => (
+                  <Cell key={entry.severity} fill={SEVERITY_COLORS[entry.severity].bg} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Recent Incidents</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {stats.recent_incidents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No incidents yet.{canAct ? ' Try "Simulate attack + correlate" above.' : ''}
+            </p>
+          ) : (
+            <div className="divide-y divide-border -mt-2">
+              {stats.recent_incidents.map((incident) => (
+                <Link
+                  key={incident.id}
+                  to={`/incidents/${incident.id}`}
+                  className="-mx-2 flex items-center justify-between rounded-md px-2 py-2.5 transition hover:bg-muted"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-foreground">{incident.title}</p>
+                    <p className="font-mono text-xs text-muted-foreground">{incident.affected_hosts.join(', ')}</p>
+                  </div>
+                  <div className="ml-4 flex shrink-0 items-center gap-2">
+                    <SeverityBadge severity={incident.risk_level} />
+                    <StatusBadge status={incident.status} />
+                  </div>
+                </Link>
               ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">Recent Incidents</h2>
-        {stats.recent_incidents.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            No incidents yet.{canAct ? ' Try "Simulate attack + correlate" above.' : ''}
-          </p>
-        ) : (
-          <div className="divide-y divide-slate-800">
-            {stats.recent_incidents.map((incident) => (
-              <Link
-                key={incident.id}
-                to={`/incidents/${incident.id}`}
-                className="flex items-center justify-between py-2.5 hover:bg-slate-800/40 -mx-2 px-2 rounded transition"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm text-slate-100 truncate">{incident.title}</p>
-                  <p className="text-xs text-slate-500">{incident.affected_hosts.join(', ')}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ml-4">
-                  <SeverityBadge severity={incident.risk_level} />
-                  <StatusBadge status={incident.status} />
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -51,15 +51,43 @@ class EmbeddingVector(TypeDecorator):
         return json.loads(value)
 
 
+class Organization(Base):
+    """A tenant. Every user belongs to exactly one organization, and every
+    piece of security data (events/incidents/assets/agent runs/...) is
+    scoped to one - the whole multi-tenancy model is "one org per
+    customer," not shared workspaces. `slug` is the human-typeable join
+    code a new teammate uses at registration instead of an invite link."""
+
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(100), unique=True, index=True, nullable=False)
+    plan = Column(String(20), nullable=False, default="free")
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "slug": self.slug,
+            "plan": self.plan,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(20), nullable=False, default="viewer")
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    organization = relationship("Organization")
 
 
 class RawLog(Base):
@@ -68,6 +96,7 @@ class RawLog(Base):
     __tablename__ = "raw_logs"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     source_type = Column(String(50), index=True, nullable=False)
     payload = Column(Text, nullable=False)
     received_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
@@ -81,6 +110,7 @@ class Event(Base):
     __tablename__ = "events"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     raw_log_id = Column(Integer, ForeignKey("raw_logs.id"), nullable=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True, index=True)
     # Set atomically by the correlation engine to claim a batch of candidate
@@ -124,6 +154,7 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
     confidence = Column(Integer, nullable=False, default=0)
     risk_score = Column(Integer, nullable=False, default=0)
@@ -203,6 +234,7 @@ class Asset(Base):
     __tablename__ = "assets"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     host = Column(String(255), index=True, nullable=False)
     first_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     last_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
@@ -213,13 +245,15 @@ class Asset(Base):
     owner = Column(String(255), nullable=True)
     criticality = Column(String(20), nullable=False, default="medium")
 
-    # Case-insensitive uniqueness: the same physical host is routinely logged
-    # with different casing across sources (see correlation.py), and a plain
-    # unique index on `host` would allow "abc" and "ABC" as two separate
-    # rows. Enforced at the DB level (not just app-level dedup logic in
-    # ingestion.py) so a genuine race between two concurrent first-sightings
-    # can't create duplicates either.
-    __table_args__ = (Index("ix_assets_host_lower", func.lower(host), unique=True),)
+    # Case-insensitive uniqueness *per organization*: the same physical host
+    # is routinely logged with different casing across sources (see
+    # correlation.py), and a plain unique index on `host` would allow "abc"
+    # and "ABC" as two separate rows. Enforced at the DB level (not just
+    # app-level dedup logic in ingestion.py) so a genuine race between two
+    # concurrent first-sightings can't create duplicates either. Scoped by
+    # organization_id so two different customers can each have their own
+    # "DC01" without colliding.
+    __table_args__ = (Index("ix_assets_org_host_lower", organization_id, func.lower(host), unique=True),)
 
     def to_dict(self) -> dict:
         return {
@@ -255,6 +289,121 @@ class Notification(Base):
         }
 
 
+class AgentRun(Base):
+    """One execution of the Milestone 3 multi-agent coordinator graph
+    against an incident - the durable record behind "Decision History" and
+    the "Incident Workspace" view, since the graph invocation itself is
+    in-memory and would otherwise vanish once the request returns."""
+
+    __tablename__ = "agent_runs"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False, index=True)
+    triggered_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status = Column(String(20), nullable=False, default="running", index=True)  # running | completed | failed
+    error = Column(Text, nullable=True)
+    # The final AgentState dict (detection/investigation/threat_intel_findings/
+    # risk/response/report/stage) minus "messages", which is stored as its
+    # own AgentMessage rows instead so the conversation log is queryable.
+    result = Column(JSON, nullable=True)
+    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    incident = relationship("Incident")
+    triggered_by = relationship("User")
+    messages = relationship("AgentMessage", back_populates="run", order_by="AgentMessage.created_at")
+
+    def to_summary_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "status": self.status,
+            "triggered_by_email": self.triggered_by.email if self.triggered_by else None,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "stage": (self.result or {}).get("stage"),
+        }
+
+    def to_detail_dict(self) -> dict:
+        return {
+            **self.to_summary_dict(),
+            "error": self.error,
+            "result": self.result,
+            "messages": [m.to_dict() for m in self.messages],
+        }
+
+
+class AgentMessage(Base):
+    """One entry in the inter-agent conversation log for a run - what
+    "Agent Conversations" renders."""
+
+    __tablename__ = "agent_messages"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("agent_runs.id"), nullable=False, index=True)
+    agent = Column(String(30), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    run = relationship("AgentRun", back_populates="messages")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "run_id": self.run_id,
+            "agent": self.agent,
+            "content": self.content,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ProposedAction(Base):
+    """A containment/eradication/recovery action the Response Agent
+    proposed for an incident. Nothing here is ever executed automatically -
+    this table exists purely to make the human-in-the-loop approval step
+    durable across requests (AI recommends -> human approves -> a future
+    integration executes)."""
+
+    __tablename__ = "proposed_actions"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False, index=True)
+    agent_run_id = Column(Integer, ForeignKey("agent_runs.id"), nullable=True, index=True)
+    category = Column(String(20), nullable=False, default="containment")
+    description = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    # Set once a human-approved action is actually dispatched to a
+    # ResponseActionInstance (see app/plugins/) - status becomes "executed"
+    # or "execution_failed" at that point. Still never automatic: this only
+    # ever fires from a human hitting the execute endpoint after approval.
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+    execution_result = Column(Text, nullable=True)  # JSON list of {integration, ok, message}
+
+    incident = relationship("Incident")
+    reviewed_by = relationship("User")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "agent_run_id": self.agent_run_id,
+            "category": self.category,
+            "description": self.description,
+            "status": self.status,
+            "reviewed_by_email": self.reviewed_by.email if self.reviewed_by else None,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "executed_at": self.executed_at.isoformat() if self.executed_at else None,
+            "execution_result": json.loads(self.execution_result) if self.execution_result else None,
+        }
+
+
 class Embedding(Base):
     """A vector-searchable chunk of text plus a pointer back to what it came
     from. `content_type` + `content_id` is a loose reference (not a real FK)
@@ -265,8 +414,309 @@ class Embedding(Base):
     __tablename__ = "embeddings"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     content_type = Column(String(50), nullable=False, index=True)  # "event" | "incident"
     content_id = Column(Integer, nullable=True, index=True)
     text = Column(Text, nullable=False)
     vector = Column(EmbeddingVector, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class ConnectorInstance(Base):
+    """An org's configured instance of a connector plugin
+    (app/plugins/connectors/) - the plugin class is shared code across all
+    tenants; this row is one tenant's specific config of it (e.g. which
+    GitHub repo to watch) plus sync bookkeeping."""
+
+    __tablename__ = "connector_instances"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    plugin_key = Column(String(50), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    config = Column(JSON, nullable=False, default=dict)
+    enabled = Column(Boolean, nullable=False, default=True)
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_sync_status = Column(String(20), nullable=True)  # "success" | "error"
+    last_sync_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "plugin_key": self.plugin_key,
+            "name": self.name,
+            "config": self.config,
+            "enabled": self.enabled,
+            "last_sync_at": self.last_sync_at.isoformat() if self.last_sync_at else None,
+            "last_sync_status": self.last_sync_status,
+            "last_sync_message": self.last_sync_message,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PlaybookTemplate(Base):
+    """A catalog entry for an installable AI customization - a reusable
+    prompt-template addition that changes how the platform explains an
+    incident once an org "installs" it (see app/marketplace.py). This is
+    deliberately NOT a new agent or a new plugin type (M4.2's plugin
+    architecture explicitly kept the 6-agent LangGraph pipeline fixed) -
+    installing a playbook only ever adds guidance text to an existing,
+    already-audited prompt, never new code execution. A seeded, curated
+    catalog, not organization-scoped - same pattern as ThreatIndicator and
+    ComplianceControl."""
+
+    __tablename__ = "playbook_templates"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(50), nullable=False, unique=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    category = Column(String(50), nullable=False, index=True)  # "threat-type" | "compliance" | "reporting-style"
+    prompt_addition = Column(Text, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "key": self.key,
+            "name": self.name,
+            "description": self.description,
+            "category": self.category,
+        }
+
+
+class OrgPlaybookInstall(Base):
+    """One organization's decision to enable a catalog playbook - the
+    "marketplace install" record. `UniqueConstraint` makes installing the
+    same playbook twice a harmless no-op at the DB level, not just an
+    application-level check."""
+
+    __tablename__ = "org_playbook_installs"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    playbook_id = Column(Integer, ForeignKey("playbook_templates.id"), nullable=False, index=True)
+    installed_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    playbook = relationship("PlaybookTemplate")
+
+    __table_args__ = (Index("ix_org_playbook_installs_org_playbook", "organization_id", "playbook_id", unique=True),)
+
+
+class ThreatIndicator(Base):
+    """A known-bad indicator (IP/domain/URL/hash) the platform can match
+    ingested events against. Deliberately **not** organization-scoped,
+    unlike every other table in this app - threat intelligence is shared
+    enrichment knowledge, not tenant data, the same way a commercial TI
+    vendor's feed is one subscription shared by every customer, not a
+    per-customer copy. Populated by a data migration seed (one curated
+    demo indicator, so the built-in phishing_ransomware simulate scenario
+    keeps demonstrating a real match out of the box) and by real live
+    feeds via app/threat_intel_hub.py (e.g. URLhaus)."""
+
+    __tablename__ = "threat_indicators"
+
+    id = Column(Integer, primary_key=True)
+    indicator = Column(String(512), nullable=False, index=True)
+    indicator_type = Column(String(20), nullable=False)  # ip | domain | url | hash
+    verdict = Column(String(255), nullable=False)
+    confidence = Column(Integer, nullable=False, default=50)
+    source = Column(String(100), nullable=False)
+    tags = Column(String(255), nullable=True)
+    first_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    last_seen = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    __table_args__ = (Index("ix_threat_indicators_indicator_lower", func.lower(indicator), unique=True),)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "indicator": self.indicator,
+            "indicator_type": self.indicator_type,
+            "verdict": self.verdict,
+            "confidence": self.confidence,
+            "source": self.source,
+            "tags": self.tags,
+            "first_seen": self.first_seen.isoformat() if self.first_seen else None,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+        }
+
+
+class ApiKey(Base):
+    """A machine-to-machine credential, alternative to a JWT login for
+    programmatic/service access (CI pipelines, external integrations
+    calling this API directly). Deliberately tied to a real `User` row
+    (acts with that user's role) rather than inventing a synthetic
+    principal type - every existing endpoint's `user.id`/`user.role`/
+    `user.organization_id` usage keeps working unchanged, see
+    app/auth.py's get_current_user(). Only `key_hash` is ever stored -
+    the real key is shown once at creation and is not recoverable."""
+
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    key_hash = Column(String(64), nullable=False, unique=True, index=True)
+    key_prefix = Column(String(20), nullable=False)  # shown in the UI so an admin can identify which key is which
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "key_prefix": self.key_prefix,
+            "acts_as_email": self.user.email if self.user else None,
+            "created_by_email": self.created_by.email if self.created_by else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "revoked": self.revoked_at is not None,
+        }
+
+
+class AuditLogEntry(Base):
+    """A durable record of sensitive administrative actions (role changes,
+    org rename/invite-code rotation, API key create/revoke) - deliberately
+    scoped to those specific actions rather than every request in the app,
+    to keep the instrumentation's blast radius contained. `actor_email` is
+    denormalized (not just a user_id FK) so the log entry stays readable
+    even if that user is later removed."""
+
+    __tablename__ = "audit_log_entries"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    actor_email = Column(String(255), nullable=True)
+    action = Column(String(100), nullable=False)
+    details = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "actor_email": self.actor_email,
+            "action": self.action,
+            "details": self.details,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ShiftNote(Base):
+    """A team-wide handoff note (not tied to one incident, unlike
+    IncidentComment) - what the SOC Command Center's shift log renders,
+    for context that doesn't belong to any single incident (e.g. "quiet
+    shift, nothing to flag" or "watch host X, still investigating")."""
+
+    __tablename__ = "shift_notes"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    author = relationship("User")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "author_email": self.author.email if self.author else None,
+            "body": self.body,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AnalystFeedback(Base):
+    """A human's judgment on how accurate one AI investigation/incident
+    was - the input side of the "Learning Loop": no model retraining
+    happens here (out of scope, no training infra/budget), but real
+    analyst corrections (false positives, missed detections, with notes)
+    are fed back into future Detection Agent runs as institutional memory
+    (see app/learning.py + agents/memory.py), genuinely closing the loop
+    without pretending to do online ML training."""
+
+    __tablename__ = "analyst_feedback"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False, index=True)
+    agent_run_id = Column(Integer, ForeignKey("agent_runs.id"), nullable=True, index=True)
+    rating = Column(String(20), nullable=False)  # "accurate" | "false_positive" | "missed_detection"
+    note = Column(Text, nullable=True)
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    incident = relationship("Incident")
+    reviewed_by = relationship("User")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "agent_run_id": self.agent_run_id,
+            "rating": self.rating,
+            "note": self.note,
+            "reviewed_by_email": self.reviewed_by.email if self.reviewed_by else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ComplianceControl(Base):
+    """One entry in a fixed, seeded catalog of compliance controls (a
+    curriculum, not a customer's data) - like ThreatIndicator, deliberately
+    not organization-scoped. Its *status* against one organization's real
+    data is computed on demand by app/compliance.py's check registry
+    (keyed by `check_key`) and never cached here, so a control can never
+    report a stale pass/fail."""
+
+    __tablename__ = "compliance_controls"
+
+    id = Column(Integer, primary_key=True)
+    framework = Column(String(50), nullable=False, index=True)  # "SOC2" | "ISO27001" | "GDPR"
+    control_id = Column(String(20), nullable=False)  # e.g. "CC6.1"
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    check_key = Column(String(50), nullable=False, unique=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "framework": self.framework,
+            "control_id": self.control_id,
+            "title": self.title,
+            "description": self.description,
+            "check_key": self.check_key,
+        }
+
+
+class ResponseActionInstance(Base):
+    """An org's configured instance of a response-action plugin
+    (app/plugins/actions/) - e.g. "post to our SOC Slack channel" - that
+    POST /proposed-actions/{id}/execute dispatches approved actions to."""
+
+    __tablename__ = "response_action_instances"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    plugin_key = Column(String(50), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    config = Column(JSON, nullable=False, default=dict)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "plugin_key": self.plugin_key,
+            "name": self.name,
+            "config": self.config,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

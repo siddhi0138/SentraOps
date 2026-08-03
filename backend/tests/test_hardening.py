@@ -1,13 +1,19 @@
 import io
 
 
-def test_register_rejects_short_password(client):
-    response = client.post("/auth/register", json={"email": "weak@example.com", "password": "short"})
+def test_register_rejects_short_password(client, test_org):
+    org_slug, _admin = test_org
+    response = client.post(
+        "/auth/register", json={"email": "weak@example.com", "password": "short", "organization_slug": org_slug}
+    )
     assert response.status_code == 422
 
 
-def test_register_rejects_empty_password(client):
-    response = client.post("/auth/register", json={"email": "empty@example.com", "password": ""})
+def test_register_rejects_empty_password(client, test_org):
+    org_slug, _admin = test_org
+    response = client.post(
+        "/auth/register", json={"email": "empty@example.com", "password": "", "organization_slug": org_slug}
+    )
     assert response.status_code == 422
 
 

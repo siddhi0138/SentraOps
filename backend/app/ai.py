@@ -1,9 +1,20 @@
 import json
 import os
+import time
 
 from groq import Groq, GroqError
 
+from app.metrics import ai_call_duration_seconds, ai_calls_total, ai_cost_usd_total, ai_tokens_total
+
 DEFAULT_MODEL = "llama-3.3-70b-versatile"
+
+# Real published Groq per-token pricing (USD per token, converted from their
+# per-million-token rates as of 2026-07: $0.59/1M input, $0.79/1M output for
+# llama-3.3-70b-versatile). Falls back to this same rate for any other
+# GROQ_MODEL value, since Groq doesn't expose a pricing-lookup API - close
+# enough to be a genuinely useful cost estimate, not exact for every model.
+_PROMPT_PRICE_PER_TOKEN = 0.59 / 1_000_000
+_COMPLETION_PRICE_PER_TOKEN = 0.79 / 1_000_000
 
 SYSTEM_PROMPT = """You are CyberSentinel AI, a security analyst assistant embedded in a SOC platform.
 
@@ -36,6 +47,77 @@ def _get_client() -> Groq:
     return Groq(api_key=api_key)
 
 
+def _call_groq(feature: str, *, messages: list[dict], temperature: float, max_tokens: int, json_mode: bool = False):
+    """The one place every Groq call in this app actually goes through -
+    every agent (via chat_json) and every AI feature (chat, incident/event
+    explain, NL query, the various briefings) - so instrumenting here once
+    gives real AI-observability metrics (latency, token usage, estimated
+    cost, success/failure rate) for the whole app, not a sampled subset of
+    it. `feature` is a short label (e.g. "agent_detection",
+    "incident_explain") used purely for metric cardinality, not logic."""
+    client = _get_client()
+    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
+    start = time.monotonic()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **({"response_format": {"type": "json_object"}} if json_mode else {}),
+        )
+    except GroqError as exc:
+        ai_calls_total.labels(feature=feature, status="error").inc()
+        ai_call_duration_seconds.labels(feature=feature).observe(time.monotonic() - start)
+        raise ChatProviderError(str(exc)) from exc
+
+    duration = time.monotonic() - start
+    ai_calls_total.labels(feature=feature, status="success").inc()
+    ai_call_duration_seconds.labels(feature=feature).observe(duration)
+
+    # isinstance-checked, not just truthy: response.usage on a real Groq
+    # response is a real object with int fields, but plenty of existing
+    # tests mock the response as a bare MagicMock() without setting .usage,
+    # which auto-vivifies .usage.prompt_tokens as another MagicMock rather
+    # than an int - skip metric recording rather than feeding a Counter a
+    # non-numeric value (also the right defensive behavior for a real SDK
+    # response that ever omits usage).
+    usage = getattr(response, "usage", None)
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+    completion_tokens = getattr(usage, "completion_tokens", None)
+    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+        ai_tokens_total.labels(feature=feature, token_type="prompt").inc(prompt_tokens)
+        ai_tokens_total.labels(feature=feature, token_type="completion").inc(completion_tokens)
+        cost = prompt_tokens * _PROMPT_PRICE_PER_TOKEN + completion_tokens * _COMPLETION_PRICE_PER_TOKEN
+        ai_cost_usd_total.labels(feature=feature).inc(cost)
+
+    return response
+
+
+def chat_json(system_prompt: str, user_content: str, *, temperature: float = 0.2, max_tokens: int = 700, feature: str = "chat_json") -> dict:
+    """Generic JSON-mode Groq call - the one place that owns model
+    selection, JSON parsing, and provider-error translation for every
+    single-shot structured call in the app, including each Milestone 3
+    agent, so none of them re-implement this boilerplate."""
+    response = _call_groq(
+        feature,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=temperature,
+        max_tokens=max_tokens,
+        json_mode=True,
+    )
+
+    raw = response.choices[0].message.content
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"_raw": raw}
+
+
 def _format_evidence(evidence: list[dict]) -> str:
     if not evidence:
         return "(no matching evidence found in the platform's data)"
@@ -48,22 +130,15 @@ def _format_evidence(evidence: list[dict]) -> str:
 
 
 def answer_question(question: str, evidence: list[dict]) -> str:
-    client = _get_client()
-    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
-
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Evidence:\n{_format_evidence(evidence)}\n\nQuestion: {question}"},
-            ],
-            temperature=0.2,
-            max_tokens=800,
-        )
-    except GroqError as exc:
-        raise ChatProviderError(str(exc)) from exc
-
+    response = _call_groq(
+        "chat",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Evidence:\n{_format_evidence(evidence)}\n\nQuestion: {question}"},
+        ],
+        temperature=0.2,
+        max_tokens=800,
+    )
     return response.choices[0].message.content
 
 
@@ -80,14 +155,18 @@ _EXPLAIN_TONE_BY_AUDIENCE = {
 }
 
 
-def _explain_system_prompt(audience: str) -> str:
+def _explain_system_prompt(audience: str, playbook_guidance: str = "") -> str:
     tone = _EXPLAIN_TONE_BY_AUDIENCE.get(audience, _EXPLAIN_TONE_BY_AUDIENCE["analyst"])
+    # Playbook guidance comes from app/marketplace.py - an org-installed
+    # "AI Marketplace" playbook adding extra instructions to this same
+    # prompt, never new code execution (see PlaybookTemplate's docstring).
+    guidance_block = f"\n{playbook_guidance}\n" if playbook_guidance else ""
     return f"""You are CyberSentinel AI, a security analyst assistant. Given an \
 incident's report (timeline, alerts, threat intel, risk factors), produce a \
 structured explanation of it.
 
 {tone}
-
+{guidance_block}
 Respond with ONLY a JSON object (no markdown fences, no extra text) with \
 exactly these string keys:
 - "explanation": 2-4 sentences explaining WHY this incident has the risk \
@@ -119,23 +198,17 @@ def _fallback_explanation(raw_text: str) -> dict:
     }
 
 
-def explain_incident(report: str, confidence: int, audience: str = "analyst") -> dict:
-    client = _get_client()
-    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
-
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _explain_system_prompt(audience)},
-                {"role": "user", "content": f"Incident report:\n{report}"},
-            ],
-            temperature=0.2,
-            max_tokens=700,
-            response_format={"type": "json_object"},
-        )
-    except GroqError as exc:
-        raise ChatProviderError(str(exc)) from exc
+def explain_incident(report: str, confidence: int, audience: str = "analyst", playbook_guidance: str = "") -> dict:
+    response = _call_groq(
+        "incident_explain",
+        messages=[
+            {"role": "system", "content": _explain_system_prompt(audience, playbook_guidance)},
+            {"role": "user", "content": f"Incident report:\n{report}"},
+        ],
+        temperature=0.2,
+        max_tokens=700,
+        json_mode=True,
+    )
 
     raw = response.choices[0].message.content
     try:
@@ -180,22 +253,16 @@ def _fallback_event_explanation(raw_text: str) -> dict:
 
 
 def explain_event(event_text: str) -> dict:
-    client = _get_client()
-    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
-
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _EXPLAIN_EVENT_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Event:\n{event_text}"},
-            ],
-            temperature=0.2,
-            max_tokens=300,
-            response_format={"type": "json_object"},
-        )
-    except GroqError as exc:
-        raise ChatProviderError(str(exc)) from exc
+    response = _call_groq(
+        "event_explain",
+        messages=[
+            {"role": "system", "content": _EXPLAIN_EVENT_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Event:\n{event_text}"},
+        ],
+        temperature=0.2,
+        max_tokens=300,
+        json_mode=True,
+    )
 
     raw = response.choices[0].message.content
     try:
@@ -269,22 +336,16 @@ def _clean_query_filters(parsed: dict) -> dict:
 
 
 def translate_query(question: str) -> dict:
-    client = _get_client()
-    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
-
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _QUERY_SYSTEM_PROMPT},
-                {"role": "user", "content": question},
-            ],
-            temperature=0,
-            max_tokens=200,
-            response_format={"type": "json_object"},
-        )
-    except GroqError as exc:
-        raise ChatProviderError(str(exc)) from exc
+    response = _call_groq(
+        "nl_query",
+        messages=[
+            {"role": "system", "content": _QUERY_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ],
+        temperature=0,
+        max_tokens=200,
+        json_mode=True,
+    )
 
     raw = response.choices[0].message.content
     try:

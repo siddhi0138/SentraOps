@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.correlation import run_correlation
 from app.db import run_migrations
-from app.db_models import Event, Incident
+from app.db_models import Event, Incident, Organization
 from app.ingestion import ingest
 
 
@@ -19,7 +19,11 @@ def test_concurrent_correlate_calls_do_not_double_claim_events(tmp_path):
 
     seed_engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     seed_session = sessionmaker(bind=seed_engine)()
-    ingest(seed_session, "generic", [
+    org = Organization(name="Test Org", slug="test-org")
+    seed_session.add(org)
+    seed_session.commit()
+    org_id = org.id
+    ingest(seed_session, org_id, "generic", [
         {"timestamp": "2026-07-24T09:00:00", "host": "HOST-A", "username": "alice", "event_type": "privilege_escalation", "severity": "high", "message": "a1"},
         {"timestamp": "2026-07-24T09:05:00", "host": "HOST-B", "username": "bob", "event_type": "privilege_escalation", "severity": "high", "message": "b1"},
     ])
@@ -35,7 +39,7 @@ def test_concurrent_correlate_calls_do_not_double_claim_events(tmp_path):
         session = sessionmaker(bind=engine)()
         try:
             barrier.wait(timeout=5)  # both threads call run_correlation as close together as possible
-            results[slot] = run_correlation(session)
+            results[slot] = run_correlation(session, org_id)
         except Exception as exc:  # pragma: no cover - surfaced via `errors` below
             errors.append(exc)
         finally:

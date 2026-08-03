@@ -1,15 +1,51 @@
 import type {
+  AgentInvestigationResult,
+  AgentRunDetail,
+  AgentRunListItem,
+  AgentRunStatus,
+  AgentRunSummary,
+  AiObservabilitySummary,
   AppNotification,
   Asset,
   ChatResponse,
+  ConnectorInstance,
+  ConnectorPluginType,
   EventExplanation,
   EventItem,
+  GraphData,
   IncidentComment,
   IncidentDetail,
   IncidentExplanation,
+  IncidentMemory,
   IncidentStatus,
   IncidentSummary,
+  ProposedAction,
+  ProposedActionReviewStatus,
   QueryResult,
+  AnalystFeedback,
+  ApiKeyCreated,
+  ApiKeySummary,
+  AuditLogEntryItem,
+  CommandCenterQueue,
+  ComplianceControl,
+  ComplianceReportResponse,
+  DigitalTwinNarrativeResponse,
+  DigitalTwinSimulation,
+  EvaluationSummary,
+  ExecutiveBriefingResponse,
+  ExecutiveSummary,
+  FeedbackRating,
+  LearningStats,
+  Playbook,
+  OrganizationSettings,
+  PredictiveBriefingResponse,
+  PredictiveSummary,
+  ResponseActionInstance,
+  ResponseActionPluginType,
+  ShiftNote,
+  StreamingStatus,
+  ThreatIndicator,
+  ThreatIndicatorType,
   SimilarIncident,
   Role,
   SearchResults,
@@ -72,6 +108,17 @@ function buildUrl(path: string, params?: Record<string, string | number | undefi
     }
   }
   return url
+}
+
+function buildWsUrl(path: string, params?: Record<string, string | undefined>): string {
+  const url = buildUrl(path)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) url.searchParams.set(key, value)
+    }
+  }
+  return url.toString()
 }
 
 interface RequestOptions {
@@ -138,8 +185,10 @@ async function downloadFile(path: string, params: Record<string, string | number
 }
 
 export const api = {
-  register: (email: string, password: string) =>
-    request<User>('/auth/register', { method: 'POST', body: { email, password }, auth: false }),
+  register: (email: string, password: string, organization_slug: string) =>
+    request<User>('/auth/register', { method: 'POST', body: { email, password, organization_slug }, auth: false }),
+  createOrganization: (organization_name: string, email: string, password: string) =>
+    request<User>('/organizations', { method: 'POST', body: { organization_name, email, password }, auth: false }),
   login: (email: string, password: string) =>
     request<TokenPair>('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
   me: () => request<User>('/auth/me'),
@@ -177,6 +226,110 @@ export const api = {
   updateIncident: (id: number, payload: { status?: IncidentStatus; priority?: Severity; assignee_id?: number | null }) =>
     request<IncidentDetail>(`/incidents/${id}`, { method: 'PATCH', body: payload }),
   addComment: (id: number, body: string) => request<IncidentComment>(`/incidents/${id}/comments`, { method: 'POST', body: { body } }),
+
+  getIncidentMemory: (id: number) => request<IncidentMemory>(`/incidents/${id}/memory`),
+  investigateIncident: (id: number) => request<AgentInvestigationResult>(`/incidents/${id}/investigate`, { method: 'POST' }),
+  investigateIncidentLive: (id: number) =>
+    request<{ run_id: number; incident_id: number; status: AgentRunStatus }>(`/incidents/${id}/investigate-live`, {
+      method: 'POST',
+    }),
+  agentRunWsUrl: (runId: number) => buildWsUrl(`/ws/agent-runs/${runId}`, { token: getAccessToken() ?? '' }),
+  listAgentRuns: (id: number) => request<{ incident_id: number; runs: AgentRunSummary[] }>(`/incidents/${id}/agent-runs`),
+  listAllAgentRuns: (params: { status?: AgentRunStatus; limit?: number } = {}) =>
+    request<{ runs: AgentRunListItem[] }>('/agent-runs', { params }),
+  getAgentRun: (runId: number) => request<AgentRunDetail>(`/agent-runs/${runId}`),
+
+  syncGraph: () => request<{ incidents: number; events_processed: number }>('/graph/sync', { method: 'POST' }),
+  getIncidentGraph: (id: number) => request<GraphData>(`/graph/incident/${id}`),
+  getEntityBlastRadius: (type: 'host' | 'user' | 'ip', value: string, hops = 2) =>
+    request<GraphData>('/graph/entity', { params: { type, value, hops } }),
+  getFullGraph: (limit = 300) => request<GraphData>('/graph', { params: { limit } }),
+  simulateCompromise: (type: 'host' | 'user' | 'ip', value: string, hops = 2) =>
+    request<DigitalTwinSimulation>('/digital-twin/simulate', { params: { type, value, hops } }),
+  getDigitalTwinNarrative: (type: 'host' | 'user' | 'ip', value: string, hops = 2) =>
+    request<DigitalTwinNarrativeResponse>('/digital-twin/narrative', { method: 'POST', params: { type, value, hops } }),
+  getAiObservabilitySummary: () => request<AiObservabilitySummary>('/observability/ai-summary'),
+
+  getThreatIntelGraph: (limit = 300) => request<GraphData>('/threat-intel/graph', { params: { limit } }),
+  syncThreatIntelGraph: () =>
+    request<{ indicators: number; tag_links: number; incident_matches: number }>('/threat-intel/graph/sync', {
+      method: 'POST',
+    }),
+  listProposedActions: (id: number) =>
+    request<{ incident_id: number; actions: ProposedAction[] }>(`/incidents/${id}/proposed-actions`),
+  reviewProposedAction: (actionId: number, status: ProposedActionReviewStatus) =>
+    request<ProposedAction>(`/proposed-actions/${actionId}`, { method: 'PATCH', body: { status } }),
+  executeProposedAction: (actionId: number) =>
+    request<ProposedAction>(`/proposed-actions/${actionId}/execute`, { method: 'POST' }),
+
+  listConnectorPlugins: () => request<{ connectors: ConnectorPluginType[] }>('/plugins/connectors'),
+  listResponseActionPlugins: () => request<{ actions: ResponseActionPluginType[] }>('/plugins/response-actions'),
+  listConnectors: () => request<{ connectors: ConnectorInstance[] }>('/connectors'),
+  createConnector: (payload: { plugin_key: string; name: string; config: Record<string, string> }) =>
+    request<ConnectorInstance>('/connectors', { method: 'POST', body: payload }),
+  testConnector: (id: number) => request<{ ok: boolean; message: string }>(`/connectors/${id}/test`, { method: 'POST' }),
+  syncConnector: (id: number) =>
+    request<{ connector: ConnectorInstance; ingested: number; skipped: number }>(`/connectors/${id}/sync`, {
+      method: 'POST',
+    }),
+  listResponseActionInstances: () =>
+    request<{ actions: ResponseActionInstance[] }>('/response-action-instances'),
+  createResponseActionInstance: (payload: { plugin_key: string; name: string; config: Record<string, string> }) =>
+    request<ResponseActionInstance>('/response-action-instances', { method: 'POST', body: payload }),
+
+  getCurrentOrganization: () => request<OrganizationSettings>('/organizations/current'),
+  renameOrganization: (name: string) =>
+    request<OrganizationSettings>('/organizations/current', { method: 'PATCH', body: { name } }),
+  rotateInviteCode: () => request<OrganizationSettings>('/organizations/current/rotate-invite-code', { method: 'POST' }),
+  listApiKeys: () => request<{ api_keys: ApiKeySummary[] }>('/api-keys'),
+  createApiKey: (name: string, userId?: number) =>
+    request<ApiKeyCreated>('/api-keys', { method: 'POST', body: { name, user_id: userId } }),
+  revokeApiKey: (id: number) => request<ApiKeySummary>(`/api-keys/${id}/revoke`, { method: 'POST' }),
+  listAuditLog: (limit = 50) => request<{ entries: AuditLogEntryItem[] }>('/audit-log', { params: { limit } }),
+
+  listMarketplacePlaybooks: () => request<{ playbooks: Playbook[] }>('/marketplace/playbooks'),
+  installPlaybook: (id: number) => request<Playbook>(`/marketplace/playbooks/${id}/install`, { method: 'POST' }),
+  uninstallPlaybook: (id: number) => request<Playbook>(`/marketplace/playbooks/${id}/uninstall`, { method: 'POST' }),
+
+  getCommandCenterQueue: () => request<CommandCenterQueue>('/command-center/queue'),
+  listShiftNotes: (limit = 20) => request<{ notes: ShiftNote[] }>('/shift-notes', { params: { limit } }),
+  createShiftNote: (body: string) => request<ShiftNote>('/shift-notes', { method: 'POST', body: { body } }),
+
+  submitIncidentFeedback: (incidentId: number, payload: { rating: FeedbackRating; note?: string; agent_run_id?: number }) =>
+    request<AnalystFeedback>(`/incidents/${incidentId}/feedback`, { method: 'POST', body: payload }),
+  listIncidentFeedback: (incidentId: number) =>
+    request<{ incident_id: number; feedback: AnalystFeedback[] }>(`/incidents/${incidentId}/feedback`),
+  getLearningStats: () => request<LearningStats>('/learning/stats'),
+  getEvaluationSummary: () => request<EvaluationSummary>('/learning/evaluation'),
+
+  listComplianceControls: () => request<{ controls: ComplianceControl[] }>('/compliance/controls'),
+  getComplianceReport: () => request<ComplianceReportResponse>('/compliance/report', { method: 'POST' }),
+
+  getExecutiveSummary: () => request<ExecutiveSummary>('/executive/summary'),
+  getExecutiveBriefing: () => request<ExecutiveBriefingResponse>('/executive/briefing', { method: 'POST' }),
+
+  getPredictiveSummary: () => request<PredictiveSummary>('/predictive/summary'),
+  getPredictiveBriefing: () => request<PredictiveBriefingResponse>('/predictive/briefing', { method: 'POST' }),
+
+  listThreatIndicators: (params: { q?: string; indicator_type?: ThreatIndicatorType; limit?: number } = {}) =>
+    request<{ indicators: ThreatIndicator[] }>('/threat-intel/indicators', { params }),
+  syncThreatIntel: () => request<{ synced: number }>('/threat-intel/sync', { method: 'POST' }),
+
+  getStreamingStatus: () => request<StreamingStatus>('/streaming/status'),
+  sendTestStreamLog: () =>
+    request<{ queued: number }>('/ingest/generic/stream', {
+      method: 'POST',
+      body: {
+        logs: [
+          {
+            host: 'stream-test-host',
+            event_type: 'streaming_test_event',
+            severity: 'low',
+            message: `Test log sent via streaming ingestion at ${new Date().toISOString()}`,
+          },
+        ],
+      },
+    }),
 
   listAssets: (params: { q?: string; limit?: number; offset?: number }) =>
     request<{ total: number; assets: Asset[] }>('/assets', { params }),

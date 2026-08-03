@@ -3,8 +3,11 @@ import ReactMarkdown from 'react-markdown'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { AgentInvestigationPanel } from '../components/AgentInvestigationPanel'
+import { AttackGraphView } from '../components/AttackGraphView'
+import { AttackReplayPanel } from '../components/AttackReplayPanel'
 import { SeverityBadge, StatusBadge } from '../components/Badge'
-import type { IncidentDetail, IncidentExplanation, Severity, SimilarIncident, User } from '../api/types'
+import type { GraphData, IncidentDetail, IncidentExplanation, Severity, SimilarIncident, User } from '../api/types'
 
 const PRIORITIES: Severity[] = ['low', 'medium', 'high', 'critical']
 
@@ -27,6 +30,7 @@ export function IncidentDetailPage() {
   const [explainError, setExplainError] = useState<string | null>(null)
   const [audience, setAudience] = useState<'analyst' | 'executive'>('analyst')
   const [similar, setSimilar] = useState<SimilarIncident[]>([])
+  const [graph, setGraph] = useState<GraphData | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -53,6 +57,16 @@ export function IncidentDetailPage() {
       .similarIncidents(Number(id))
       .then((res) => setSimilar(res.matches))
       .catch(() => setSimilar([]))
+  }, [id])
+
+  useEffect(() => {
+    // 503s if /graph/sync has never been run - fail silently and just hide
+    // the section rather than surfacing an error for an optional view.
+    if (!id) return
+    api
+      .getIncidentGraph(Number(id))
+      .then(setGraph)
+      .catch(() => setGraph(null))
   }, [id])
 
   useEffect(() => {
@@ -311,6 +325,22 @@ export function IncidentDetailPage() {
           </div>
         )}
       </div>
+
+      <AgentInvestigationPanel incidentId={incident.id} canAct={canAct} />
+
+      <AttackReplayPanel incidentId={incident.id} timeline={incident.timeline} />
+
+      {graph && graph.nodes.length > 0 && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-slate-300">Attack Graph</h2>
+            <Link to="/attack-graph" className="text-xs text-slate-500 hover:text-slate-300 transition">
+              Explore full graph &rarr;
+            </Link>
+          </div>
+          <AttackGraphView data={graph} />
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">

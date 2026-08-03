@@ -3,6 +3,12 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
+# sentence-transformers pulls in torch, and PyPI's default torch wheel bundles
+# the full CUDA runtime (~2GB of nvidia_* packages) this container will never
+# use since it has no GPU - install the CPU-only build first so the later
+# `pip install -r requirements.txt` finds torch already satisfied and never
+# reaches for the CUDA one.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .

@@ -4,15 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.db_models import Event, Incident, Notification, User
 from app.rag import store_embedding
+from app.threat_intel_hub import lookup_many
 
 ALERT_SEVERITIES = {"medium", "high", "critical"}
 SEVERITY_WEIGHTS = {"low": 5, "medium": 15, "high": 25, "critical": 35}
-
-# Mock feed standing in for a real threat intel API (VirusTotal/AbuseIPDB)
-# until milestone 2 wires one up.
-KNOWN_BAD_IPS = {
-    "185.220.101.45": ("known Tor exit node / ransomware C2 infrastructure", 98, "AbuseIPDB (mock)"),
-}
 
 
 class _DisjointSet:
@@ -95,17 +90,33 @@ def _classify(cluster: list[Event]) -> tuple[str, int]:
     return "Suspicious activity requiring investigation", 55
 
 
-def _lookup_threat_intel(timeline: list[Event]) -> list[dict]:
-    matches = []
-    seen_ips: set[str] = set()
-
+def _lookup_threat_intel(db: Session, timeline: list[Event]) -> list[dict]:
+    """Matches each event's source_ip and host against the shared Threat
+    Intel Hub (app/threat_intel_hub.py) - a real, queryable, cross-tenant
+    indicator table (seeded with one curated demo indicator, extendable
+    with real feeds like URLhaus), replacing what used to be a single
+    hardcoded IP in this file."""
+    candidates: list[str | None] = []
     for event in timeline:
-        ip = event.source_ip
-        if ip and ip not in seen_ips and ip in KNOWN_BAD_IPS:
-            verdict, confidence, source = KNOWN_BAD_IPS[ip]
-            matches.append({"indicator": ip, "indicator_type": "ip", "verdict": verdict, "confidence": confidence, "source": source})
-            seen_ips.add(ip)
+        candidates.append(event.source_ip)
+        candidates.append(event.host)
 
+    hits = lookup_many(db, candidates)
+    seen: set[str] = set()
+    matches = []
+    for value, indicator in hits.items():
+        if indicator.indicator.lower() in seen:
+            continue
+        seen.add(indicator.indicator.lower())
+        matches.append(
+            {
+                "indicator": value,
+                "indicator_type": indicator.indicator_type,
+                "verdict": indicator.verdict,
+                "confidence": indicator.confidence,
+                "source": indicator.source,
+            }
+        )
     return matches
 
 
@@ -119,7 +130,7 @@ def _assess_risk(cluster: list[Event], threat_intel: list[dict]) -> tuple[int, s
 
     if threat_intel:
         score += 20
-        factors.append("source IP matched known-malicious threat intel")
+        factors.append("matched known-malicious threat intel")
 
     event_types = {e.event_type for e in cluster}
     if "data_transfer" in event_types and "privilege_escalation" in event_types:
@@ -203,10 +214,12 @@ def _generate_report(
     return "\n".join(lines)
 
 
-def run_correlation(db: Session) -> list[Incident]:
+def run_correlation(db: Session, organization_id: int) -> list[Incident]:
     """Clusters not-yet-correlated events into incidents and persists them.
     Idempotent-ish: events already assigned to an incident are left alone,
-    so re-running only picks up newly ingested activity.
+    so re-running only picks up newly ingested activity. Scoped to one
+    organization per call - two tenants' events must never be clustered
+    into the same incident.
 
     Safe under concurrent calls: candidate events are atomically claimed via
     a single bulk UPDATE before any processing. The database's own row/table
@@ -219,7 +232,7 @@ def run_correlation(db: Session) -> list[Incident]:
     rolls back the claim too and the events stay available for retry."""
     claim_id = str(uuid.uuid4())
     db.query(Event).filter(
-        Event.incident_id.is_(None), Event.correlation_claim.is_(None)
+        Event.organization_id == organization_id, Event.incident_id.is_(None), Event.correlation_claim.is_(None)
     ).update({Event.correlation_claim: claim_id}, synchronize_session=False)
 
     uncorrelated = db.query(Event).filter(Event.correlation_claim == claim_id).order_by(Event.timestamp).all()
@@ -247,12 +260,13 @@ def run_correlation(db: Session) -> list[Incident]:
         claimed_ids.update(e.id for e in timeline)
 
         title, confidence = _classify(cluster)
-        threat_intel = _lookup_threat_intel(timeline)
+        threat_intel = _lookup_threat_intel(db, timeline)
         risk_score, risk_level, factors = _assess_risk(cluster, threat_intel)
         actions = _recommend_actions(cluster, risk_level)
         report = _generate_report(title, confidence, timeline, cluster, threat_intel, risk_score, risk_level, factors, actions)
 
         incident = Incident(
+            organization_id=organization_id,
             title=title,
             confidence=confidence,
             risk_score=risk_score,
@@ -271,8 +285,8 @@ def run_correlation(db: Session) -> list[Incident]:
         for event in timeline:
             event.incident_id = incident.id
 
-        store_embedding(db, "incident", incident.id, f"{title}\n\n{report}")
-        _notify_responders(db, incident)
+        store_embedding(db, organization_id, "incident", incident.id, f"{title}\n\n{report}")
+        _notify_responders(db, organization_id, incident)
         incidents.append(incident)
 
     # Release the claim on any candidate that didn't end up matching a
@@ -289,10 +303,17 @@ def run_correlation(db: Session) -> list[Incident]:
     return incidents
 
 
-def _notify_responders(db: Session, incident: Incident) -> None:
-    """New incidents page every admin/analyst - there's no assignee yet for a
-    freshly-correlated incident, so everyone who could triage it gets notified."""
-    responders = db.query(User).filter(User.role.in_(("admin", "analyst")), User.is_active.is_(True)).all()
+def _notify_responders(db: Session, organization_id: int, incident: Incident) -> None:
+    """New incidents page every admin/analyst *in the same organization* -
+    there's no assignee yet for a freshly-correlated incident, so everyone
+    who could triage it gets notified. Must stay org-scoped: paging another
+    tenant's staff would both leak this incident's existence/title to them
+    and spam them with an alert they have no way to act on."""
+    responders = (
+        db.query(User)
+        .filter(User.organization_id == organization_id, User.role.in_(("admin", "analyst")), User.is_active.is_(True))
+        .all()
+    )
     for user in responders:
         db.add(Notification(
             user_id=user.id,
