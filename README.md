@@ -136,9 +136,10 @@ Two free ways to put this on a real URL, both actually built and tested against 
 
 **Render (`render.yaml` Blueprint)** — fully managed, no server to maintain. Push to a fork, connect it in Render's dashboard (**New → Blueprint**), and it provisions the backend, Celery worker, static frontend, a standalone embeddings service, and a metrics-forwarding agent from `render.yaml`. Point it at free managed Postgres (e.g. [Neon](https://neon.tech), with `CREATE EXTENSION vector;` for pgvector), [Neo4j AuraDB Free](https://neo4j.com/product/auradb/), and [Upstash Redis](https://upstash.com) instead of the Docker Compose containers. Render's free web service tier caps at 512MB RAM - too tight to run the local embedding model alongside LangGraph/Neo4j/everything else in one process, so `sentraops-embeddings` runs it in its own dedicated free service instead (`embed_text()` calls out to it over HTTP when `EMBEDDINGS_SERVICE_URL` is set, and loads the model in-process otherwise). Metrics forward to [Grafana Cloud](https://grafana.com)'s free tier (`monitoring/prometheus-agent/`) instead of self-hosting Prometheus/Grafana, since Render's free tier has no persistent disk.
 
-Two free-tier gotchas worth knowing before you deploy:
+A few free-tier gotchas worth knowing before you deploy:
 - **Neo4j Aura's database username isn't always `neo4j`** - some instances use the instance ID itself as the username instead. Check the exact value on your instance's Connect / Developer Hub page rather than assuming the classic default.
-- **Free web services sleep after 15 minutes idle**, which costs a 30-60s cold start on the next request. A free scheduled ping (e.g. [cron-job.org](https://cron-job.org), hitting `/health` every 10 minutes) keeps a given service warm - but since that uses close to the full 750 free hours/month by itself, only keep-alive the backend, not all four services, or you'll exhaust the shared monthly pool.
+- **Free web services sleep after 15 minutes idle**, which costs a 30-60s cold start on the next request. A free scheduled ping (e.g. [cron-job.org](https://cron-job.org), hitting `/health` every 10 minutes) keeps a given service warm - but since that uses close to the full 750 free hours/month by itself, only keep-alive the backend, not all five services, or you'll exhaust the shared monthly pool.
+- **Grafana Cloud's dashboard panels don't provision themselves** - connecting the metrics agent only gets data flowing into storage. You still need to manually import `monitoring/grafana/provisioning/dashboards/json/cybersentinel.json` (Grafana Cloud → Dashboards → New → Import) and point each panel at the Prometheus data source Grafana Cloud auto-created for you (not the literal `"Prometheus"` placeholder the JSON ships with).
 
 **Self-hosted + Cloudflare Tunnel** — run `docker compose up` on any machine with a public internet connection (no port-forwarding, no public IP needed) and expose it via a free [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/). No memory ceiling, the complete app with no trade-offs, but tied to that machine staying on. A quick tunnel (`cloudflared tunnel --url ...`) works instantly but gives an ephemeral URL that changes on restart; a named tunnel with your own domain's DNS pointed at Cloudflare's nameservers gives a permanent one.
 
@@ -233,7 +234,7 @@ backend/    FastAPI app, agents, migrations, tests
 frontend/   React + Vite app
 deploy/     Helm chart + Terraform (Kind cluster) for a real K8s deployment
 monitoring/ Prometheus + Grafana provisioning, plus a remote-write agent for Grafana Cloud
-render.yaml Render Blueprint - backend, Celery worker, static frontend, metrics agent
+render.yaml Render Blueprint - backend, Celery worker, static frontend, embeddings service, metrics agent
 ```
 
 ## 🧪 Tests
