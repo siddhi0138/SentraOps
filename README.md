@@ -225,6 +225,18 @@ SentraOps can open a real Jira ticket automatically whenever a proposed response
 
 Approve any proposed action afterward and a real ticket shows up in your Jira project.
 
+**4. (Optional) Sync ticket resolution back to SentraOps**
+
+By default this integration is one-way: SentraOps → Jira. Resolving the Jira ticket does nothing to the incident on its own. To make completing the ticket automatically close the SentraOps incident it was created for:
+
+- In SentraOps: `GET /connectors/jira/webhook-url` (owner/admin only — call it with your bearer token, e.g. from the browser dev console or `curl`) returns a one-time-generated URL like `https://your-backend.onrender.com/webhooks/jira/{your-org-slug}/{secret}`
+- In Jira: **Project settings → Automation → Create rule**
+  - Trigger: **Issue transitioned** → select your "Done"/resolved status
+  - New action: **Send web request** → paste the URL from above, method `POST`, body `{{issue}}` (Jira's automation web request already sends the issue JSON when left as the default webhook body)
+  - Save and enable the rule
+
+The secret is embedded in the URL path itself (same pattern as a Slack/Discord incoming webhook) since Jira Automation's web request action can't send a custom Authorization header on the free/standard plan. Only paste this URL into Jira's own automation config — anyone with it can close incidents in your org. SentraOps matches the incoming Jira issue key against the ticket it created for each approved action, so this only ever closes the incident that ticket was opened for.
+
 ---
 
 ## 🗂️ Project structure

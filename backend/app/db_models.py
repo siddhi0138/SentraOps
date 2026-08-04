@@ -65,6 +65,12 @@ class Organization(Base):
     slug = Column(String(100), unique=True, index=True, nullable=False)
     plan = Column(String(20), nullable=False, default="free")
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    # Generated lazily on first request for the Jira webhook URL (see
+    # GET /connectors/jira/webhook-url) - embedded in that URL's path so
+    # Jira's own webhook call authenticates itself just by knowing the URL,
+    # the same pattern Slack/Discord incoming webhooks use. Never returned
+    # from to_dict() - only the dedicated endpoint that generates it exposes it.
+    jira_webhook_secret = Column(String(64), nullable=True)
 
     def to_dict(self) -> dict:
         return {

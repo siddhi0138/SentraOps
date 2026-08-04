@@ -2,6 +2,8 @@ import csv
 import io
 import json
 import os
+import re
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -1615,6 +1617,92 @@ def execute_proposed_action(
     db.commit()
     db.refresh(action)
     return action.to_dict()
+
+
+_JIRA_ISSUE_KEY_RE = re.compile(r"Created Jira issue ([A-Z][A-Z0-9]*-\d+)")
+
+
+@app.get("/connectors/jira/webhook-url")
+def get_jira_webhook_url(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Role.owner, Role.admin)),
+) -> dict:
+    """Returns the org-specific URL to paste into a Jira Automation rule
+    (trigger: issue transitioned) so that resolving a Jira ticket closes the
+    SentraOps incident it was created for. The secret lives in the URL path
+    itself, not a header - Jira Automation's webhook action can't set custom
+    headers on the free/standard tier, so this is the same "secret-URL"
+    pattern Slack/Discord incoming webhooks use."""
+    org = db.get(Organization, user.organization_id)
+    if org.jira_webhook_secret is None:
+        org.jira_webhook_secret = secrets.token_urlsafe(32)
+        db.commit()
+        db.refresh(org)
+    base = str(request.base_url).rstrip("/")
+    return {"webhook_url": f"{base}/webhooks/jira/{org.slug}/{org.jira_webhook_secret}"}
+
+
+@app.post("/webhooks/jira/{org_slug}/{secret}")
+async def jira_status_webhook(org_slug: str, secret: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    """Public endpoint a Jira Automation rule POSTs to on issue transition.
+    No auth dependency - the org+secret in the URL path is the auth, same as
+    the OAuth-free "secret URL" Slack/Discord incoming webhooks use, since
+    Jira Automation's webhook action can't be configured to sign requests or
+    send an Authorization header on every plan.
+
+    Always returns 200 (even on "no match found") so Jira doesn't disable
+    the webhook after a few non-2xx responses - a skipped/unmatched event is
+    a normal, expected outcome here (e.g. a ticket unrelated to SentraOps),
+    not a failure worth retrying."""
+    org = db.query(Organization).filter(Organization.slug == org_slug).first()
+    if org is None or org.jira_webhook_secret is None or not secrets.compare_digest(org.jira_webhook_secret, secret):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    payload = await request.json()
+    issue = payload.get("issue") or {}
+    issue_key = issue.get("key")
+    status_category = ((issue.get("fields") or {}).get("status") or {}).get("statusCategory") or {}
+    if not issue_key or status_category.get("key") != "done":
+        return {"ok": True, "matched": False, "message": "Not a 'done' transition, no action taken"}
+
+    candidates = (
+        db.query(ProposedAction)
+        .filter(ProposedAction.organization_id == org.id, ProposedAction.execution_result.isnot(None))
+        .all()
+    )
+    matched_action = None
+    for candidate in candidates:
+        try:
+            results = json.loads(candidate.execution_result)
+        except (TypeError, ValueError):
+            continue
+        for result in results:
+            match = _JIRA_ISSUE_KEY_RE.search(result.get("message", ""))
+            if match and match.group(1) == issue_key:
+                matched_action = candidate
+                break
+        if matched_action:
+            break
+
+    if matched_action is None:
+        return {"ok": True, "matched": False, "message": f"No SentraOps action found for Jira issue {issue_key}"}
+
+    incident = matched_action.incident
+    if incident.status == "closed":
+        return {"ok": True, "matched": True, "already_closed": True, "incident_id": incident.id}
+
+    incident.status = "closed"
+    incident.closed_at = datetime.now(timezone.utc)
+    record_audit(
+        db,
+        org.id,
+        actor_email=f"jira-webhook:{issue_key}",
+        action="incident_closed_via_jira",
+        details={"incident_id": incident.id, "jira_issue_key": issue_key},
+    )
+    db.commit()
+    return {"ok": True, "matched": True, "incident_id": incident.id, "message": f"Closed incident #{incident.id} via Jira {issue_key}"}
 
 
 @app.get("/threat-intel/indicators")
