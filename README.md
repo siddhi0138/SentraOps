@@ -12,10 +12,10 @@
 
 | | URL |
 |---|---|
-| App | [bit-frequencies-treated-tremendous.trycloudflare.com](https://bit-frequencies-treated-tremendous.trycloudflare.com) |
-| API docs (Swagger) | [bracket-doug-elementary-appliances.trycloudflare.com/docs](https://bracket-doug-elementary-appliances.trycloudflare.com/docs) |
+| App | [sentraops-frontend.onrender.com](https://sentraops-frontend.onrender.com) |
+| API docs (Swagger) | [sentraops-backend-tvow.onrender.com/docs](https://sentraops-backend-tvow.onrender.com/docs) |
 
-Self-hosted via Docker Compose behind a free Cloudflare Tunnel — real end-to-end functionality (signup, ingestion, correlation, the full 6-agent AI investigation), not a static mockup. These are Cloudflare *quick tunnel* URLs, so they're tied to the host machine staying on and will change if it restarts — if the links above are dead, that's why. See **Quick start** below to run it yourself.
+Deployed on Render's free tier — Postgres (Neon) + Neo4j (Aura) + Redis (Upstash) all real managed free-tier services, metrics forwarded to Grafana Cloud. **Known limitation:** the free web service tier caps memory at 512MB, which is tight for the local embedding model (used for RAG/semantic search) running alongside everything else in the same process — AI/embedding-heavy endpoints (Simulate Attack, ingestion, chat, Knowledge Base) can occasionally 502 and take ~20-30s to auto-recover under this constraint. Signup, login, and everything else works normally. Run it yourself (see **Quick start** below) for the full app with no memory ceiling.
 
 ---
 
@@ -86,10 +86,10 @@ Every feature below is backed by a real running system, not a mock:
 | Layer | Stack |
 |---|---|
 | Backend | FastAPI, SQLAlchemy, Alembic, Celery + Redis |
-| AI / Agents | LangGraph, Groq (`llama-3.3-70b-versatile`), sentence-transformers (local embeddings) |
+| AI / Agents | LangGraph, Groq (`llama-3.3-70b-versatile`), sentence-transformers over ONNX Runtime (local embeddings) |
 | Data | PostgreSQL + pgvector, Neo4j |
 | Frontend | React, TypeScript, Vite, Tailwind CSS — mobile-first (collapsing sidebar/bottom tab bar, responsive tables, no page ever scrolls horizontally as a whole) |
-| Ops | Docker Compose, Kubernetes (Helm + Terraform), Prometheus, Grafana |
+| Ops | Docker Compose, Kubernetes (Helm + Terraform), Render Blueprint, Prometheus, Grafana / Grafana Cloud |
 
 No paid API keys required to run the core platform — the LLM layer uses Groq's free tier, embeddings run locally (no API key at all), and the two reference connectors are free/keyless.
 
@@ -127,6 +127,16 @@ On first open, register a new organization from the login screen, then click **S
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET` | For Slack integration | From your own Slack app at api.slack.com/apps. The rest of the app works without it — "Connect to Slack" just won't appear functional until set. |
 | `FRONTEND_URL` | For Slack integration | Where Slack redirects/links back to after an OAuth install (e.g. `http://localhost:5173`) |
 | `VIRUSTOTAL_API_KEY` / `ABUSEIPDB_API_KEY` | No | Free tiers at virustotal.com / abuseipdb.com. Without them, the Threat Intel agent uses the platform's own local indicator table instead of live lookups. |
+
+---
+
+## ☁️ Deploying
+
+Two free ways to put this on a real URL, both actually built and tested against this repo:
+
+**Render (`render.yaml` Blueprint)** — fully managed, no server to maintain. Push to a fork, connect it in Render's dashboard (**New → Blueprint**), and it provisions the backend, Celery worker, static frontend, and a metrics-forwarding agent from `render.yaml`. Point it at free managed Postgres (e.g. [Neon](https://neon.tech), with `CREATE EXTENSION vector;` for pgvector), [Neo4j AuraDB Free](https://neo4j.com/product/auradb/), and [Upstash Redis](https://upstash.com) instead of the Docker Compose containers. **Trade-off:** Render's free web service caps at 512MB RAM, which is tight running the local embedding model alongside everything else — AI/embedding-heavy endpoints can occasionally 502 and self-recover after ~20-30s under that ceiling. Metrics forward to [Grafana Cloud](https://grafana.com)'s free tier (`monitoring/prometheus-agent/`) instead of self-hosting Prometheus/Grafana, since Render's free tier has no persistent disk.
+
+**Self-hosted + Cloudflare Tunnel** — run `docker compose up` on any machine with a public internet connection (no port-forwarding, no public IP needed) and expose it via a free [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/). No memory ceiling, the complete app with no trade-offs, but tied to that machine staying on. A quick tunnel (`cloudflared tunnel --url ...`) works instantly but gives an ephemeral URL that changes on restart; a named tunnel with your own domain's DNS pointed at Cloudflare's nameservers gives a permanent one.
 
 ---
 
@@ -218,7 +228,8 @@ Approve any proposed action afterward and a real ticket shows up in your Jira pr
 backend/    FastAPI app, agents, migrations, tests
 frontend/   React + Vite app
 deploy/     Helm chart + Terraform (Kind cluster) for a real K8s deployment
-monitoring/ Prometheus + Grafana provisioning
+monitoring/ Prometheus + Grafana provisioning, plus a remote-write agent for Grafana Cloud
+render.yaml Render Blueprint - backend, Celery worker, static frontend, metrics agent
 ```
 
 ## 🧪 Tests
