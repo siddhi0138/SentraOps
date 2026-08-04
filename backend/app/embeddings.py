@@ -37,7 +37,20 @@ def embed_text(text: str) -> list[float]:
     if service_url:
         import httpx
 
-        response = httpx.post(f"{service_url}/embed", json={"text": text}, timeout=30)
-        response.raise_for_status()
-        return response.json()["vector"]
+        # On Render's free tier the embeddings service sleeps after 15min
+        # idle, same as this one - confirmed by testing that a 30s timeout
+        # isn't enough for its cold-start wake (~30-60s), which was turning
+        # into a 500 here instead of just a slow-but-successful request.
+        # One retry: the request that wakes it up can itself still time out
+        # right at the boundary, but the service is warm by the time we
+        # send the second one.
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = httpx.post(f"{service_url}/embed", json={"text": text}, timeout=90)
+                response.raise_for_status()
+                return response.json()["vector"]
+            except httpx.HTTPError as exc:
+                last_error = exc
+        raise last_error
     return _embed_local(text)
