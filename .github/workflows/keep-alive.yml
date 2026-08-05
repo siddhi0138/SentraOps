@@ -1,0 +1,21 @@
+name: Backend keep-alive
+
+on:
+  schedule:
+    # Every 10 minutes, 06:00-23:59 UTC - matches the free-tier hour budget
+    # this project already runs within (see README's Render section). GitHub
+    # Actions schedules on a public repo are unmetered, and unlike a
+    # third-party pinger, a failed run here never auto-disables the
+    # schedule - it just shows red in the Actions tab.
+    - cron: "*/10 6-23 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health endpoint
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
+            https://sentraops-backend-tvow.onrender.com/health
