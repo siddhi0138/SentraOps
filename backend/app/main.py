@@ -1659,12 +1659,21 @@ async def jira_status_webhook(org_slug: str, secret: str, request: Request, db: 
     if org is None or org.jira_webhook_secret is None or not secrets.compare_digest(org.jira_webhook_secret, secret):
         raise HTTPException(status_code=404, detail="Not found")
 
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
     issue = payload.get("issue") or {}
+    if not isinstance(issue, dict):
+        issue = {}
     issue_key = issue.get("key")
-    status_category = ((issue.get("fields") or {}).get("status") or {}).get("statusCategory") or {}
-    if not issue_key or status_category.get("key") != "done":
-        return {"ok": True, "matched": False, "message": "Not a 'done' transition, no action taken"}
+    status = issue.get("fields", {}).get("status") if isinstance(issue.get("fields"), dict) else None
+    status_category = (status or {}).get("statusCategory") if isinstance(status, dict) else None
+    is_done = isinstance(status_category, dict) and status_category.get("key") == "done"
+    if not issue_key or not is_done:
+        return {"ok": True, "matched": False, "message": "Not a 'done' transition, no action taken", "received_keys": list(payload.keys())}
 
     candidates = (
         db.query(ProposedAction)
