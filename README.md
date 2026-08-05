@@ -8,17 +8,6 @@
 
 ---
 
-## 🔗 Live demo
-
-| | URL |
-|---|---|
-| App | [sentraops-frontend.onrender.com](https://sentraops-frontend.onrender.com) |
-| API docs (Swagger) | [sentraops-backend-tvow.onrender.com/docs](https://sentraops-backend-tvow.onrender.com/docs) |
-
-Deployed on Render's free tier — Postgres (Neon) + Neo4j (Aura) + Redis (Upstash) all real managed free-tier services, metrics forwarded to Grafana Cloud with live dashboards. The local embedding model runs as its own dedicated free service (`sentraops-embeddings`) rather than inside the main backend process — Render's free web service tier caps memory at 512MB, which the model alone fits but not alongside LangGraph, the Neo4j driver, and everything else the main process holds, so it's split out. A scheduled keep-alive ping keeps the backend from sleeping during active hours, so it stays responsive without the usual free-tier cold-start delay. Verified end-to-end against this exact deployment, with no mocked data anywhere: signup, simulate, correlate, real Neo4j graph queries, real RAG similarity search, and the full 6-agent AI investigation all working live.
-
----
-
 ## 🧭 Why this exists
 
 Most "AI SOC" demos are a dashboard with an LLM bolted on for a chat box. SentraOps is built the other way around: a real, working Security Operations Center — real log ingestion, a real correlation engine, real multi-tenant data isolation — with a genuine multi-agent AI analyst layered on top of that foundation, not in place of it.
