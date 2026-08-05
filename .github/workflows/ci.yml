@@ -24,10 +24,14 @@ jobs:
       # CPU-only torch first, same reasoning as backend/Dockerfile: PyPI's
       # default torch wheel bundles the full CUDA runtime this runner never
       # uses, so install the CPU build before requirements.txt can pull it in.
+      # No --no-cache-dir here (unlike the Dockerfile) - this runner is
+      # ephemeral, so populating pip's cache is what lets the `cache: pip`
+      # step above actually speed up the next run instead of erroring on a
+      # cache dir that was never created.
       - name: Install dependencies
         run: |
-          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-          pip install --no-cache-dir -r requirements.txt
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
 
       # Tests default DATABASE_URL to a tmp SQLite file and
       # CELERY_TASK_ALWAYS_EAGER=true (see tests/conftest.py), and Neo4j/Redis
