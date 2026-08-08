@@ -4,6 +4,16 @@
 
 **An AI Security Team for SMEs** — a real Security Operations Center platform with a multi-agent AI analyst layered on top, not a chatbot wrapper around a demo dashboard.
 
+<!--
+TODO(demo): record a 2-3 min screen capture: ingest a log source ->
+"Simulate attack + correlate" on the Dashboard -> a new incident appears
+-> click into it and watch the 6-agent investigation stream live ->
+attack graph view -> approve a proposed response action. Save as
+docs/demo.gif (or a YouTube/Loom link). Once it exists, replace this
+comment with: ![SentraOps demo](docs/demo.gif)
+-->
+> 🎥 **Demo video/GIF goes here** — ingest → correlate → 6-agent investigation (live) → attack graph → approve a response action.
+
 </div>
 
 ---
@@ -18,6 +28,57 @@ Every feature below is backed by a real running system, not a mock:
 - A real graph database (Neo4j) backs attack-path and blast-radius analysis
 - Real LLM calls (Groq), grounded in your own ingested data via retrieval — the assistant explicitly says so when the evidence doesn't support an answer, rather than inventing one
 - Every proposed AI response action requires human approval before anything is treated as "executed" — nothing here is autonomous by default, whether the resulting action is an outbound webhook or a real Jira/ServiceNow ticket
+
+---
+
+## 🧩 How an incident actually gets investigated
+
+Traced directly from `app/correlation.py` and `app/agents/coordinator.py` — not a marketing diagram:
+
+```text
+Raw events (Windows/syslog/firewall/CloudTrail/JSON/CSV), normalized on ingest
+        │
+        ▼
+Correlation engine: union-find clusters events sharing a host, user, or
+source IP into one incident candidate — not a fixed rule, a real graph
+clustering pass over whatever came in in this batch
+        │
+        ▼
+Risk-scored + a first-pass markdown report written deterministically
+(severity weights + threat-intel hit + privilege-escalation/data-transfer
+combo) — before any LLM is involved
+        │
+        ▼
+┌─────────────────────────── LangGraph, one incident ───────────────────────────┐
+│                                                                                 │
+│  Detection ──▶ Investigation ──▶ Threat Intel ──▶ Risk ──▶ Response ──▶ Report │
+│                                                                                 │
+│  Each node reads everything every prior node wrote via one shared AgentState — │
+│  a fixed hand-off order, like a human SOC manager routing one incident through │
+│  the team, not six agents debating freely                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+Institutional memory (similar past incidents, repeat hosts/users, analyst
+corrections) and real Neo4j attack-graph connectivity are injected into the
+agents above, not just this incident's own events in isolation
+        │
+        ▼
+Streamed live over WebSocket, stage by stage, to the incident view
+```
+
+### What each agent actually does
+
+| Agent | Input | Grounded in | Produces |
+|---|---|---|---|
+| **Detection** | The correlated event cluster + institutional memory | Raw events only — told explicitly not to invent hosts/users/timestamps | Whether this is a genuine coherent attack pattern, its own confidence score, key indicators |
+| **Investigation** | Detection's output + full event timeline + Neo4j attack-graph connectivity | The literal timeline, plus only graph nodes actually listed | A chronological forensic narrative, specific findings tied to specific events, the attacker's likely objective |
+| **Threat Intel** | Known IOC matches (local table, or live VirusTotal/AbuseIPDB if configured) + timeline | Only matches actually returned — explicitly told it has no live feed access itself | MITRE ATT&CK technique classification **with the specific evidence for each**, malware association if any, its own confidence |
+| **Risk** | All prior agents' findings + real asset inventory (criticality/department/owner) + repeat-offender history + graph reach | Asset data and history actually given — never invents a department or asset | A business (not technical) risk score/level and which specific asset is most exposed |
+| **Response** | Everything above | The specific hosts/accounts/IPs already found — told not to give generic advice | Concrete containment/eradication/recovery actions, each requiring human approval before anything executes |
+| **Report** | The entire investigation | All prior agents' actual output, no templates | Separate executive summary, technical summary, compliance notes, and customer-notification recommendation |
+
+Every agent's system prompt explicitly forbids inventing facts not present in what it was given — the same "compute/correlate first, narrate second" discipline, just applied to a security investigation instead of a stats pipeline.
 
 ---
 
