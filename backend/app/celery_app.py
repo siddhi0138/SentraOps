@@ -36,18 +36,24 @@ _conf = {
     },
 }
 
-if REDIS_URL.startswith("rediss://"):
-    # redis-py refuses to build a TLS connection at all unless ssl_cert_reqs
-    # is explicit, and won't infer a default - confirmed live against a
-    # managed Redis provider's rediss:// URL, which crashed the worker on
-    # every single startup with "A rediss:// URL must have parameter
-    # ssl_cert_reqs" before this was added. CERT_NONE (not CERT_REQUIRED)
-    # because managed Redis providers' certs are provider-issued, not
-    # necessarily in this container's CA bundle, and the connection is
-    # already scoped to a private, provider-issued hostname+credentials -
-    # the thing worth protecting here is in-transit encryption, not
-    # verifying that hostname against a public CA chain.
-    _conf["broker_use_ssl"] = {"ssl_cert_reqs": ssl.CERT_NONE}
-    _conf["redis_backend_use_ssl"] = {"ssl_cert_reqs": ssl.CERT_NONE}
+def redis_ssl_conf(redis_url: str) -> dict:
+    """redis-py refuses to build a TLS connection at all unless ssl_cert_reqs
+    is explicit, and won't infer a default - confirmed live against a
+    managed Redis provider's rediss:// URL, which crashed the worker on
+    every single startup with "A rediss:// URL must have parameter
+    ssl_cert_reqs" before this was added. CERT_NONE (not CERT_REQUIRED)
+    because managed Redis providers' certs are provider-issued, not
+    necessarily in this container's CA bundle, and the connection is
+    already scoped to a private, provider-issued hostname+credentials -
+    the thing worth protecting here is in-transit encryption, not
+    verifying that hostname against a public CA chain."""
+    if not redis_url.startswith("rediss://"):
+        return {}
+    return {
+        "broker_use_ssl": {"ssl_cert_reqs": ssl.CERT_NONE},
+        "redis_backend_use_ssl": {"ssl_cert_reqs": ssl.CERT_NONE},
+    }
 
+
+_conf.update(redis_ssl_conf(REDIS_URL))
 celery_app.conf.update(**_conf)
