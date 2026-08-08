@@ -21,7 +21,7 @@ python-dotenv==1.0.1
 numpy==2.2.1
 langgraph==1.2.9
 celery==5.5.3
-redis==5.2.1
+redis==8.1.0
 neo4j==5.28.4
 prometheus-fastapi-instrumentator==8.1.0
 prometheus-client==0.25.0
