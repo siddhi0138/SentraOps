@@ -1,6 +1,6 @@
 FROM prom/prometheus:v2.55.1 AS prom
 
-FROM alpine:3.20
+FROM alpine:3.24
 # gettext gives us envsubst - Prometheus's own config format has no env-var
 # substitution, and the backend's public URL + Grafana Cloud credentials
 # are only known at deploy time (Render env vars), not at build time.
