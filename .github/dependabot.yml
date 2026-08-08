@@ -1,33 +1,55 @@
 version: 2
 updates:
+  # Grouping collapses every minor/patch bump for an ecosystem into a single
+  # monthly PR instead of one PR per package - major bumps are excluded from
+  # the group (and from opening a PR at all) since those need a real look,
+  # not a rubber-stamp merge (see the TypeScript 7.0 PR: typescript-eslint
+  # didn't even support it yet). None of this affects actual vulnerability
+  # alerts - GitHub's separate Dependabot security updates still open a PR
+  # immediately for a real CVE regardless of these settings.
   - package-ecosystem: pip
     directory: /backend
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      actions:
+        update-types: [minor, patch]
 
   - package-ecosystem: docker
     directory: /backend
     schedule:
-      interval: weekly
+      interval: monthly
 
   - package-ecosystem: docker
     directory: /frontend
     schedule:
-      interval: weekly
+      interval: monthly
 
   - package-ecosystem: docker
     directory: /monitoring/prometheus-agent
     schedule:
-      interval: weekly
+      interval: monthly
