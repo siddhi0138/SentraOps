@@ -4,16 +4,6 @@
 
 **An AI Security Team for SMEs** — a real Security Operations Center platform with a multi-agent AI analyst layered on top, not a chatbot wrapper around a demo dashboard.
 
-<!--
-TODO(demo): record a 2-3 min screen capture: ingest a log source ->
-"Simulate attack + correlate" on the Dashboard -> a new incident appears
--> click into it and watch the 6-agent investigation stream live ->
-attack graph view -> approve a proposed response action. Save as
-docs/demo.gif (or a YouTube/Loom link). Once it exists, replace this
-comment with: ![SentraOps demo](docs/demo.gif)
--->
-> 🎥 **Demo video/GIF goes here** — ingest → correlate → 6-agent investigation (live) → attack graph → approve a response action.
-
 </div>
 
 ---
