@@ -1,4 +1,4 @@
-FROM prom/prometheus:v2.55.1 AS prom
+FROM prom/prometheus:v3.13.2 AS prom
 
 FROM alpine:3.20
 # gettext gives us envsubst - Prometheus's own config format has no env-var
