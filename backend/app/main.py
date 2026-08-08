@@ -261,7 +261,8 @@ def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)) -
 
 
 @app.post("/auth/refresh", response_model=TokenPair)
-def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenPair:
+@limiter.limit("10/minute")
+def refresh(request: Request, payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenPair:
     user_id = decode_token(payload.refresh_token, "refresh")
     user = db.get(User, user_id)
     if not user or not user.is_active:
@@ -434,7 +435,9 @@ def list_audit_log(
 
 
 @app.post("/ingest/upload")
+@limiter.limit("20/minute")
 async def ingest_upload(
+    request: Request,
     source_type: str = Query(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -530,7 +533,9 @@ def delete_knowledge_base_document(
 
 
 @app.post("/ingest/{source_type}")
+@limiter.limit("20/minute")
 def ingest_logs(
+    request: Request,
     source_type: str,
     payload: IngestRequest,
     db: Session = Depends(get_db),
@@ -545,7 +550,9 @@ def ingest_logs(
 
 
 @app.post("/ingest/{source_type}/stream")
+@limiter.limit("20/minute")
 def ingest_logs_streaming(
+    request: Request,
     source_type: str,
     payload: IngestRequest,
     user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
@@ -570,7 +577,9 @@ def get_streaming_status(user: User = Depends(require_roles(Role.owner, Role.adm
 
 
 @app.post("/simulate/{scenario}")
+@limiter.limit("5/minute")
 def simulate(
+    request: Request,
     scenario: str,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
@@ -616,7 +625,9 @@ class BasRunRequest(BaseModel):
 
 
 @app.post("/bas/run")
+@limiter.limit("5/minute")
 def run_bas_campaign(
+    request: Request,
     payload: BasRunRequest,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
@@ -1644,12 +1655,16 @@ def get_jira_webhook_url(
 
 
 @app.post("/webhooks/jira/{org_slug}/{secret}")
+@limiter.limit("20/minute")
 async def jira_status_webhook(org_slug: str, secret: str, request: Request, db: Session = Depends(get_db)) -> dict:
     """Public endpoint a Jira Automation rule POSTs to on issue transition.
     No auth dependency - the org+secret in the URL path is the auth, same as
     the OAuth-free "secret URL" Slack/Discord incoming webhooks use, since
     Jira Automation's webhook action can't be configured to sign requests or
-    send an Authorization header on every plan.
+    send an Authorization header on every plan. Rate-limited by IP (this is
+    unauthenticated, so that's the only key slowapi can use) as defense in
+    depth against brute-forcing the secret, on top of it being an
+    unguessable 32-byte token.
 
     Always returns 200 (even on "no match found") so Jira doesn't disable
     the webhook after a few non-2xx responses - a skipped/unmatched event is
