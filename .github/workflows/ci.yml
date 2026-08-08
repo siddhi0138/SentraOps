@@ -75,3 +75,14 @@ jobs:
     steps:
       - name: Trigger Render deploy
         run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+
+  deploy-celery-worker:
+    # celery-worker builds from this same repo/Dockerfile as the backend, so
+    # it's exposed to the same broken-auto-deploy issue - same fix, separate
+    # service (Render Deploy Hooks are per-service, not per-repo).
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_CELERY }}"
