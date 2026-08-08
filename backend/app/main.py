@@ -198,21 +198,6 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/_debug/client-ip")
-def _debug_client_ip(request: Request) -> dict:
-    # TEMPORARY - diagnosing why per-IP rate limiting stopped accumulating
-    # after switching the key func to prefer X-Forwarded-For's first hop;
-    # remove this endpoint once root-caused.
-    from app.rate_limit import _client_ip
-    from slowapi.util import get_remote_address
-
-    return {
-        "xff": request.headers.get("x-forwarded-for") or "<none>",
-        "client_host": get_remote_address(request),
-        "computed_key": _client_ip(request),
-    }
-
-
 @app.post("/organizations", response_model=UserOut)
 @limiter.limit("5/minute")
 def create_organization(request: Request, payload: OrganizationCreate, db: Session = Depends(get_db)) -> UserOut:
