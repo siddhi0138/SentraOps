@@ -63,3 +63,15 @@ jobs:
       # tsc -b && vite build - typechecks and builds in one step.
       - name: Build
         run: npm run build
+
+  deploy-backend:
+    # Render's own GitHub webhook stopped firing auto-deploys for the
+    # backend service (same issue found on IntelliVerse) - this calls
+    # Render's per-service Deploy Hook directly instead, bypassing that
+    # broken connection, only after a real push to master passes both jobs.
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
