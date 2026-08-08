@@ -7,6 +7,22 @@ from app.auth import ALGORITHM, SECRET_KEY
 from app.redis_client import REDIS_URL
 
 
+def _client_ip(request: Request) -> str:
+    """slowapi's own get_remote_address() only ever reads request.client.host
+    - behind a reverse proxy (this app sits behind Render's, in front of a
+    Kubernetes ingress) that's the proxy's own hop, not the real caller, and
+    isn't guaranteed stable across requests if the proxy fronting this
+    service is itself a pool of edge nodes. X-Forwarded-For's first hop is
+    the original client and is what actually stays stable per caller -
+    found this the hard way on IntelliVerse's identical helper, where relying
+    on request.client.host silently made per-IP rate limiting never
+    accumulate in production despite working perfectly in local tests."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
+
 def _rate_limit_key(request: Request) -> str:
     """Key by the calling user when a valid JWT is present, else by IP.
 
@@ -26,7 +42,7 @@ def _rate_limit_key(request: Request) -> str:
                 return f"user:{user_id}"
         except jwt.PyJWTError:
             pass
-    return f"ip:{get_remote_address(request)}"
+    return f"ip:{_client_ip(request)}"
 
 
 # Redis-backed (not in-memory) since this app runs as multiple pods in

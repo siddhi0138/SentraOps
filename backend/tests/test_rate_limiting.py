@@ -3,7 +3,7 @@ import pytest
 from starlette.requests import Request
 
 from app.auth import create_access_token
-from app.rate_limit import _rate_limit_key, limiter
+from app.rate_limit import _client_ip, _rate_limit_key, limiter
 from app.redis_client import REDIS_URL
 
 
@@ -46,6 +46,18 @@ def _fake_request(headers: list[tuple[bytes, bytes]]) -> Request:
         "client": ("203.0.113.5", 12345),
     }
     return Request(scope)
+
+
+def test_client_ip_prefers_x_forwarded_for_over_client_host():
+    # Regression test for a real production bug found on IntelliVerse's
+    # identical helper: get_remote_address() only ever reads
+    # request.client.host, which behind a reverse proxy is the proxy's own
+    # (possibly pooled, unstable) hop, not the real caller - per-IP rate
+    # limiting silently never accumulated in production because every
+    # request looked like a different "IP". X-Forwarded-For's first hop is
+    # the original client and is what actually stays stable per caller.
+    request = _fake_request([(b"x-forwarded-for", b"198.51.100.9, 10.0.0.1")])
+    assert _client_ip(request) == "198.51.100.9"
 
 
 def test_rate_limit_key_uses_ip_when_unauthenticated():
