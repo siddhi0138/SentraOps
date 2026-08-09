@@ -284,6 +284,9 @@ deployment, not something this backend's own test suite imports.
 
 CI runs both on every push/PR via GitHub Actions (`.github/workflows/ci.yml`).
 
+The auth model, rate limiting, RBAC, secrets handling, and dependency/
+container scanning are documented in **[SECURITY.md](SECURITY.md)**.
+
 ---
 
 ## 🤝 Contributing
