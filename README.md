@@ -276,6 +276,12 @@ cd backend && pytest
 cd frontend && npm run build   # typecheck + production build
 ```
 
+578 backend tests, **90% line coverage** (`pytest --cov=app`, tool-measured) —
+including the FastAPI route layer itself (`app/main.py`, 89%), not just
+isolated logic. The one file at 0% (`app/embeddings_service.py`) is the
+entrypoint for a separate microservice that runs as its own Render
+deployment, not something this backend's own test suite imports.
+
 CI runs both on every push/PR via GitHub Actions (`.github/workflows/ci.yml`).
 
 ---

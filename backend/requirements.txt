@@ -7,6 +7,7 @@ psycopg2-binary==2.9.12
 python-multipart==0.0.32
 python-dateutil==2.9.0.post0
 pytest==9.1.1
+pytest-cov==7.1.0
 httpx==0.28.1
 pyjwt==2.13.0
 bcrypt==5.0.0
