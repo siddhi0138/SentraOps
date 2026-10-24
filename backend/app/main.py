@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import secrets
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -604,6 +605,10 @@ def simulate(
             results[source_type] = {"ingested": len(events), "skipped": skipped}
     except Exception:
         logger.exception("Synthetic simulate scenario '%s' failed during ingest", scenario)
+        # Temporary debugging aid: SIMULATE_DEBUG=1 on the service returns the
+        # traceback in the 500 body. Off by default; remove once the bug is fixed.
+        if os.environ.get("SIMULATE_DEBUG") == "1":
+            raise HTTPException(status_code=500, detail=traceback.format_exc())
         raise
 
     return {"scenario": scenario, "mode": "synthetic", "sources": results}
