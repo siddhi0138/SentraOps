@@ -171,7 +171,7 @@ def test_streaming_ingest_falls_back_to_inline_when_redis_is_down(client, analys
     was_eager = celery_app.conf.task_always_eager
     celery_app.conf.task_always_eager = False
     try:
-        with patch("app.main.redis_is_available", return_value=False):
+        with patch("app.main.worker_available", return_value=False):
             response = client.post(
                 "/ingest/generic/stream",
                 json={"logs": [{"timestamp": "2026-07-27T00:00:00", "host": "h1", "event_type": "x", "message": "m"}]},

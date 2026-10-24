@@ -119,6 +119,7 @@ from app.streaming import publish_raw_log, stream_status
 from app import scheduler
 from app.celery_app import celery_app
 from app.redis_client import get_client as get_redis_client, is_available as redis_is_available
+from app.workers import worker_available
 from app.tasks import consume_ingest_stream_task, investigate_incident_task, run_investigation_in_background
 from app.threat_intel_hub import get_indicator_graph, resync_indicator_graph
 from app.threat_intel_hub import search as search_indicators
@@ -599,7 +600,7 @@ def ingest_logs_streaming(
     producer shouldn't block on ingestion; POST /ingest/{source_type}
     and the connector /sync endpoint stay synchronous since their
     immediate ingested-count response is valuable for a "test now" UX."""
-    if not (celery_app.conf.task_always_eager or redis_is_available()):
+    if not (worker_available()):
         # No Redis means no stream and no worker to drain it. Ingest the logs
         # directly instead of failing, so nothing a producer sends is lost.
         logger.warning("Redis unavailable; ingesting streamed logs inline")
@@ -1161,7 +1162,7 @@ def investigate_incident_live(
     db.commit()
     db.refresh(run)
 
-    if celery_app.conf.task_always_eager or redis_is_available():
+    if worker_available():
         investigate_incident_task.delay(run.id, incident_id)
         return {"run_id": run.id, "incident_id": incident_id, "status": run.status}
 

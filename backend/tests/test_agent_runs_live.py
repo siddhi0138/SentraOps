@@ -180,7 +180,7 @@ def test_investigate_live_runs_in_background_thread_when_redis_is_down(client, a
         # The fake model replies must stay patched until the background thread is done,
         # unlike _investigate_live, which unpatches as soon as the request returns.
         with ExitStack() as stack:
-            stack.enter_context(patch("app.main.redis_is_available", return_value=False))
+            stack.enter_context(patch("app.main.worker_available", return_value=False))
             stack.enter_context(patch("app.agents.detection.chat_json", return_value=FAKE_DETECTION))
             stack.enter_context(patch("app.agents.investigation.chat_json", return_value=FAKE_INVESTIGATION))
             stack.enter_context(patch("app.agents.threat_intel.chat_json", return_value=FAKE_THREAT_INTEL))
