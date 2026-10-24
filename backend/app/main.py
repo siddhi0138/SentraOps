@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -121,6 +122,8 @@ async def lifespan(app: FastAPI):
     init_db()
     yield
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SentraOps", version="0.2.0", lifespan=lifespan)
 
@@ -590,12 +593,18 @@ def simulate(
         events, skipped = ingest(db, user.organization_id, "bas", bas_events)
         return {"scenario": scenario, "mode": "real", "sources": {"bas": {"ingested": len(events), "skipped": skipped}}}
     except Exception:
-        pass  # no cluster access, or a live run failed - fall back below
+        # Logged, not silent: expected on Render (no Kubernetes API), but a real
+        # BAS failure should be visible in the service logs.
+        logger.info("BAS campaign unavailable, falling back to synthetic scenario", exc_info=True)
 
     results = {}
-    for source_type, raw_items in logs_by_source.items():
-        events, skipped = ingest(db, user.organization_id, source_type, raw_items)
-        results[source_type] = {"ingested": len(events), "skipped": skipped}
+    try:
+        for source_type, raw_items in logs_by_source.items():
+            events, skipped = ingest(db, user.organization_id, source_type, raw_items)
+            results[source_type] = {"ingested": len(events), "skipped": skipped}
+    except Exception:
+        logger.exception("Synthetic simulate scenario '%s' failed during ingest", scenario)
+        raise
 
     return {"scenario": scenario, "mode": "synthetic", "sources": results}
 
