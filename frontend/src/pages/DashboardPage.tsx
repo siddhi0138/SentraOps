@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import type { AgentRunListItem, Asset, EventItem, Severity, Stats } from '../api/types'
+import { usePersistentState } from '../hooks/usePersistentState'
 
 const SEVERITY_ORDER: Severity[] = ['low', 'medium', 'high', 'critical']
 
@@ -49,7 +50,7 @@ export function DashboardPage() {
   const [topAssets, setTopAssets] = useState<Asset[]>([])
   const [latestRun, setLatestRun] = useState<AgentRunListItem | null>(null)
   const [loading, setLoading] = useState(true)
-  const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [actionMessage, setActionMessage] = usePersistentState<string>('dashboard-action-message')
   const [actionError, setActionError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
 
@@ -98,10 +99,14 @@ export function DashboardPage() {
       }
 
       await api.syncGraph().catch(() => {})
-      await loadData()
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : 'Action failed')
     } finally {
+      // Always refresh: events and incidents are saved by the earlier steps even
+      // if a later one (like the AI investigation) fails, so they should show up.
+      await loadData().catch(() => {})
+      // Don't leave "Running AI investigation…" showing (and saved) once the run has ended.
+      setActionMessage((prev) => (prev ? prev.replace(' Running AI investigation…', '') : prev))
       setWorking(false)
     }
   }

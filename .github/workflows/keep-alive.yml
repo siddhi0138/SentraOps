@@ -20,19 +20,24 @@ jobs:
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
             https://sentraops-backend-tvow.onrender.com/health
 
-      # Runs a trivial Neo4j query through the backend so the free Aura
-      # instance counts as active - Aura Free pauses (and later deletes)
-      # databases that go unused. Goes red if Neo4j is unreachable.
-      - name: Ping Neo4j through the backend
-        run: |
-          curl --fail --silent --show-error --max-time 90 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
-            https://sentraops-backend-tvow.onrender.com/health/neo4j
-
-      # The embeddings service also sleeps after 15 minutes idle on the free tier.
-      - name: Ping embeddings service
+      # Both checks below go through the backend, which this job is already
+      # keeping awake, so they cost no extra Render instance hours. They run a
+      # real query / write so the free Aura (Neo4j) and Upstash (Redis) databases
+      # count as active - idle free databases get paused, then deleted. The app
+      # keeps working without either (graph from Postgres, in-memory fallbacks),
+      # so a failure is shown as a warning, not a red run.
+      - name: Keep Neo4j active
         if: always()
         run: |
           curl --fail --silent --show-error --max-time 90 \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
-            https://sentraops-embeddings.onrender.com/health
+            https://sentraops-backend-tvow.onrender.com/health/neo4j \
+            || echo "::warning::Neo4j is unreachable - the app is serving the graph from Postgres"
+
+      - name: Keep Redis active
+        if: always()
+        run: |
+          curl --fail --silent --show-error --max-time 90 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
+            https://sentraops-backend-tvow.onrender.com/health/redis \
+            || echo "::warning::Redis is unreachable - the app is using its in-memory fallbacks"
