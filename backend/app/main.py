@@ -92,7 +92,7 @@ from app.knowledge_base import ingest_document as ingest_knowledge_document
 from app.knowledge_base import seed_sample_documents
 from app.plugins import registry as plugin_registry
 from app.progress import REDIS_URL, channel_name
-from app.rag import search as rag_search
+from app.rag import search as rag_search, store_embeddings
 from app.rate_limit import limiter
 from app.simulate import get_scenario
 from app import bas
@@ -599,10 +599,16 @@ def simulate(
         logger.info("BAS campaign unavailable, falling back to synthetic scenario", exc_info=True)
 
     results = {}
+    pending_embeddings: list[tuple[str, int | None, str]] = []
     try:
         for source_type, raw_items in logs_by_source.items():
-            events, skipped = ingest(db, user.organization_id, source_type, raw_items)
+            events, skipped = ingest(
+                db, user.organization_id, source_type, raw_items, pending_embeddings=pending_embeddings
+            )
             results[source_type] = {"ingested": len(events), "skipped": skipped}
+        # One embedding request for all sources together, instead of one per source.
+        store_embeddings(db, user.organization_id, pending_embeddings)
+        db.commit()
     except Exception:
         logger.exception("Synthetic simulate scenario '%s' failed during ingest", scenario)
         # Temporary debugging aid: SIMULATE_DEBUG=1 on the service returns the

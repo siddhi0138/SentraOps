@@ -74,7 +74,13 @@ def _event_embedding_text(event: Event) -> str:
     return f"[{event.host}] {event.username or 'unknown'} - {event.event_type} ({event.severity}): {event.message}"
 
 
-def ingest(db: Session, organization_id: int, source_type: str, raw_items: list[Any]) -> tuple[list[Event], int]:
+def ingest(
+    db: Session,
+    organization_id: int,
+    source_type: str,
+    raw_items: list[Any],
+    pending_embeddings: list[tuple[str, int | None, str]] | None = None,
+) -> tuple[list[Event], int]:
     """Parses+normalizes raw_items via the source_type's parser and persists both
     the raw payload (for audit/replay) and the normalized event. Unparseable
     items are skipped rather than failing the whole batch.
@@ -104,8 +110,14 @@ def ingest(db: Session, organization_id: int, source_type: str, raw_items: list[
         events.append(event)
         _upsert_asset(db, organization_id, normalized["host"], normalized["timestamp"])
 
-    # One embedding call for the whole batch, not one per event - see rag.store_embeddings.
-    store_embeddings(db, organization_id, [("event", event.id, _event_embedding_text(event)) for event in events])
+    # Embedding is one call per batch, not one per event. A caller ingesting
+    # several sources in a row (like simulate) can pass a shared list to
+    # pending_embeddings and embed everything in a single call afterward.
+    items = [("event", event.id, _event_embedding_text(event)) for event in events]
+    if pending_embeddings is not None:
+        pending_embeddings.extend(items)
+    else:
+        store_embeddings(db, organization_id, items)
     db.commit()
     for event in events:
         db.refresh(event)
