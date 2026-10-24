@@ -1,3 +1,6 @@
+import logging
+import threading
+
 from app.agents.coordinator import stream_investigation
 from app.agents.runner import gather_investigation_inputs, mark_run_failed, persist_investigation_result
 from app.ai import ChatConfigError, ChatProviderError
@@ -5,6 +8,8 @@ from app.celery_app import celery_app
 from app.db_models import AgentRun, Incident
 from app.progress import publish_progress
 from app.streaming import consume_available
+
+logger = logging.getLogger(__name__)
 
 
 def _default_session_factory():
@@ -94,6 +99,27 @@ def investigate_incident_task(run_id: int, incident_id: int) -> None:
         run_investigation_job(db, run_id, incident_id)
     finally:
         db.close()
+
+
+def _run_investigation_in_thread(run_id: int, incident_id: int) -> None:
+    db = _session_factory()
+    try:
+        run_investigation_job(db, run_id, incident_id)
+    except Exception as exc:
+        logger.exception("Background investigation failed for run %s", run_id)
+        run = db.get(AgentRun, run_id)
+        if run is not None:
+            mark_run_failed(db, run, f"Investigation failed: {type(exc).__name__}")
+            publish_progress(run_id, {"type": "failed", "run_id": run_id, "error": run.error})
+    finally:
+        db.close()
+
+
+def run_investigation_in_background(run_id: int, incident_id: int) -> None:
+    """Used when Redis (and so the Celery worker) is unreachable: runs the same
+    job in a thread of this process, so /investigate-live still returns right
+    away and progress still streams, via the in-process events in app/progress.py."""
+    threading.Thread(target=_run_investigation_in_thread, args=(run_id, incident_id), daemon=True).start()
 
 
 @celery_app.task(name="consume_ingest_stream_task")

@@ -53,7 +53,7 @@ def test_build_graph_context_aggregates_real_blast_radius_excluding_own_hosts():
     with patch("app.agents.graph_context.get_entity_blast_radius", return_value=fake_subgraph) as mock_blast_radius:
         context = build_graph_context(incident)
 
-    mock_blast_radius.assert_called_once_with("host", "finance-pc-21", 1, hops=2)
+    mock_blast_radius.assert_called_once_with("host", "finance-pc-21", 1, hops=2, db=None)
     assert context == {"available": True, "connected_hosts": ["db-server-03"], "connected_incident_count": 1}
 
 
@@ -111,11 +111,27 @@ def test_health_neo4j_ok_and_503(client):
     from unittest.mock import MagicMock
 
     driver = MagicMock()
-    with patch("app.main.get_driver", return_value=driver):
+    with patch("app.graph.get_driver", return_value=driver):
         assert client.get("/health/neo4j").json() == {"status": "ok"}
         driver.session.return_value.__enter__.return_value.run.assert_called_once_with("RETURN 1")
 
-    with patch("app.main.get_driver", side_effect=ValueError("Cannot resolve address")):
+    with patch("app.graph.get_driver", side_effect=ValueError("Cannot resolve address")):
         response = client.get("/health/neo4j")
     assert response.status_code == 503
-    assert "ValueError" in response.json()["detail"]
+    assert "Neo4j unavailable" in response.json()["detail"]
+
+
+def test_health_redis_ok_and_503(client):
+    import redis
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    with patch("app.main.get_redis_client", return_value=fake):
+        assert client.get("/health/redis").json() == {"status": "ok"}
+    assert fake.set.call_args.args[0] == "keepalive"
+    fake.ping.assert_called_once()
+
+    with patch("app.main.get_redis_client", side_effect=redis.ConnectionError("down")):
+        response = client.get("/health/redis")
+    assert response.status_code == 503
+    assert "Redis unavailable" in response.json()["detail"]

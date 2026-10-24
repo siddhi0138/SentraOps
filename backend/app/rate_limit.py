@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from functools import wraps
 
 import jwt
@@ -60,27 +61,47 @@ def _get_strategy() -> MovingWindowRateLimiter:
     return _strategy
 
 
+_fallback_strategy: MovingWindowRateLimiter | None = None
+_redis_retry_at = 0.0  # monotonic time before which Redis isn't tried again after a failure
+_REDIS_RETRY_SECONDS = 60
+
+
+def _get_fallback_strategy() -> MovingWindowRateLimiter:
+    global _fallback_strategy
+    if _fallback_strategy is None:
+        _fallback_strategy = MovingWindowRateLimiter(storage_from_string("memory://"))
+    return _fallback_strategy
+
+
 def _check(spec_key: str, request: Request | None) -> None:
     if not limiter.enabled or request is None:
         return
+    global _redis_retry_at
     key = _rate_limit_key(request)
-    try:
-        allowed = _get_strategy().hit(parse(spec_key), key)
-    except Exception as exc:
-        # A dead/unreachable Redis (e.g. a free-tier instance that expired
-        # from inactivity - confirmed the actual trigger here: the
-        # configured Upstash hostname no longer resolves in DNS at all)
-        # must degrade to "no rate limiting" rather than failing every
-        # request on this app's most-hit endpoints (login, chat, signup).
-        # This replaces slowapi, whose own swallow_errors=True didn't
-        # actually protect this path - it swallowed the exception in its
-        # middleware but left request.state.view_rate_limit unset, which
-        # then raised AttributeError when the decorator tried to read it
-        # back. That's a real bug this project hit in production, not a
-        # hypothetical - confirmed by reproducing it against the real
-        # database and the real (now-dead) Redis URL.
-        logger.warning(f"Rate limiter storage unavailable ({exc!r}); allowing request through.")
-        return
+    limit = parse(spec_key)
+
+    if time.monotonic() < _redis_retry_at:
+        allowed = _get_fallback_strategy().hit(limit, key)
+    else:
+        try:
+            allowed = _get_strategy().hit(limit, key)
+        except Exception as exc:
+            # A dead/unreachable Redis (e.g. a free-tier instance that expired
+            # from inactivity - confirmed the actual trigger here: the
+            # configured Upstash hostname no longer resolves in DNS at all)
+            # must never fail the request on this app's most-hit endpoints
+            # (login, chat, signup). Limits keep being enforced, per process,
+            # from in-memory counters (fine for the single backend process this
+            # runs as), and Redis is retried after a minute. This replaces
+            # slowapi, whose own swallow_errors=True didn't actually protect this
+            # path - it swallowed the exception in its middleware but left
+            # request.state.view_rate_limit unset, which then raised
+            # AttributeError when the decorator tried to read it back. That's a
+            # real bug this project hit in production, confirmed by reproducing
+            # it against the real database and the real (now-dead) Redis URL.
+            logger.warning(f"Rate limiter storage unavailable ({exc!r}); using in-memory limits for a minute.")
+            _redis_retry_at = time.monotonic() + _REDIS_RETRY_SECONDS
+            allowed = _get_fallback_strategy().hit(limit, key)
     if not allowed:
         raise HTTPException(status_code=429, detail="Too many requests - please slow down and try again shortly.")
 

@@ -166,3 +166,82 @@ def test_agent_runs_ws_reports_already_completed_run(client, analyst_headers, db
         data = ws.receive_json()
         assert data["type"] == "completed"
         assert data["run_id"] == run_id
+
+
+def test_investigate_live_runs_in_background_thread_when_redis_is_down(client, analyst_headers, db_session):
+    import time
+
+    from app.main import celery_app
+
+    incident_id = _create_incident(client, analyst_headers)
+    was_eager = celery_app.conf.task_always_eager
+    celery_app.conf.task_always_eager = False
+    try:
+        # The fake model replies must stay patched until the background thread is done,
+        # unlike _investigate_live, which unpatches as soon as the request returns.
+        with ExitStack() as stack:
+            stack.enter_context(patch("app.main.redis_is_available", return_value=False))
+            stack.enter_context(patch("app.agents.detection.chat_json", return_value=FAKE_DETECTION))
+            stack.enter_context(patch("app.agents.investigation.chat_json", return_value=FAKE_INVESTIGATION))
+            stack.enter_context(patch("app.agents.threat_intel.chat_json", return_value=FAKE_THREAT_INTEL))
+            stack.enter_context(patch("app.agents.risk.chat_json", return_value=FAKE_RISK))
+            stack.enter_context(patch("app.agents.response.chat_json", return_value=FAKE_RESPONSE))
+            stack.enter_context(patch("app.agents.report.chat_json", return_value=FAKE_REPORT))
+
+            response = client.post(f"/incidents/{incident_id}/investigate-live", headers=analyst_headers)
+            assert response.status_code == 200
+            assert response.json()["status"] == "running"  # returned immediately
+            run_id = response.json()["run_id"]
+
+            run = {}
+            for _ in range(600):
+                db_session.expire_all()
+                run = client.get(f"/agent-runs/{run_id}", headers=analyst_headers).json()
+                if run["status"] != "running":
+                    break
+                time.sleep(0.2)
+    finally:
+        celery_app.conf.task_always_eager = was_eager
+
+    assert run["status"] == "completed"
+    assert run["result"]["detection"]["attack_pattern"] == "credential theft + lateral movement"
+
+
+def test_local_progress_events_are_recorded_and_replayable():
+    from app.progress import local_events_since, publish_progress
+
+    with patch("app.progress.get_client", side_effect=__import__("redis").ConnectionError("down")):
+        publish_progress(987001, {"type": "started", "run_id": 987001})
+        publish_progress(987001, {"type": "completed", "run_id": 987001})
+
+    assert [e["type"] for e in local_events_since(987001, 0)] == ["started", "completed"]
+    assert [e["type"] for e in local_events_since(987001, 1)] == ["completed"]
+    assert local_events_since(987002, 0) == []
+
+
+def test_agent_runs_ws_streams_in_process_progress_when_redis_is_down(client, analyst_headers, db_session):
+    from app.db_models import AgentRun
+    from app.progress import publish_progress
+
+    incident_id = _create_incident(client, analyst_headers)
+    # A run that is still going: created directly so nothing completes it behind our back.
+    run = AgentRun(
+        organization_id=client.get("/auth/me", headers=analyst_headers).json()["organization_id"],
+        incident_id=incident_id,
+        status="running",
+    )
+    db_session.add(run)
+    db_session.commit()
+    run_id = run.id
+
+    token = analyst_headers["Authorization"].split(" ")[1]
+    with patch("app.progress.get_client", side_effect=__import__("redis").ConnectionError("down")), \
+         patch("app.main.redis_is_available", return_value=False):
+        publish_progress(run_id, {"type": "started", "run_id": run_id})
+        publish_progress(run_id, {"type": "agent_completed", "run_id": run_id, "agent": "detection"})
+        publish_progress(run_id, {"type": "completed", "run_id": run_id})
+
+        with client.websocket_connect(f"/ws/agent-runs/{run_id}?token={token}") as ws:
+            received = [ws.receive_json()["type"] for _ in range(3)]
+
+    assert received == ["started", "agent_completed", "completed"]

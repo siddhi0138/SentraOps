@@ -1,5 +1,7 @@
 import logging
 
+from sqlalchemy.orm import object_session
+
 from app.db_models import Incident
 from app.graph import get_entity_blast_radius
 
@@ -18,6 +20,7 @@ def build_graph_context(incident: Incident) -> dict:
     unreachable, this returns an empty/unavailable context rather than
     failing the investigation - the same "silently optional" behavior the
     Attack Graph UI already has for an unsynced graph."""
+    db = object_session(incident)  # lets the graph fall back to Postgres if Neo4j is down
     hosts = incident.affected_hosts or []
     own_hosts_lower = {h.lower() for h in hosts}
     reachable_hosts: set[str] = set()
@@ -28,7 +31,7 @@ def build_graph_context(incident: Incident) -> dict:
     # before an agent can even start reasoning.
     for host in hosts[:5]:
         try:
-            subgraph = get_entity_blast_radius("host", host, incident.organization_id, hops=2)
+            subgraph = get_entity_blast_radius("host", host, incident.organization_id, hops=2, db=db)
         except Exception:
             # Any failure reaching Neo4j counts as "graph unavailable", not just
             # Neo4jError/ServiceUnavailable: a deleted Aura instance raises

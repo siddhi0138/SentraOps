@@ -16,7 +16,7 @@ def simulate_compromise(db: Session, entity_type: str, value: str, organization_
     in the result genuinely exists in this org's data - the only thing
     "simulated" is that none of it is executed against production, exactly
     what a digital twin means."""
-    graph = get_entity_blast_radius(entity_type, value, organization_id, hops=hops)
+    graph = get_entity_blast_radius(entity_type, value, organization_id, hops=hops, db=db)
 
     reachable_hosts = sorted({n["name"] for n in graph["nodes"] if n.get("label") == "Host" and n.get("name")})
     reachable_users = sorted({n["name"] for n in graph["nodes"] if n.get("label") == "User" and n.get("name")})
