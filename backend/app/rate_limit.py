@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from functools import wraps
 
 import jwt
@@ -6,10 +7,11 @@ from fastapi import HTTPException, Request
 from limits import parse
 from limits.storage import storage_from_string
 from limits.strategies import MovingWindowRateLimiter
-from loguru import logger
 
 from app.auth import ALGORITHM, SECRET_KEY
 from app.redis_client import REDIS_URL
+
+logger = logging.getLogger(__name__)
 
 
 def _client_ip(request: Request) -> str:
