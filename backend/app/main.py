@@ -138,10 +138,11 @@ app = FastAPI(title="SentraOps", version="0.2.0", lifespan=lifespan)
 # so browser requests to this API need CORS. Comma-separated allowlist, or
 # "*" (default) for local/demo use.
 _cors_origins = os.environ.get("CORS_ORIGINS", "*")
+_cors_origin_list = ["*"] if _cors_origins == "*" else [o.strip() for o in _cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if _cors_origins == "*" else [o.strip() for o in _cors_origins.split(",")],
-    allow_credentials=True,
+    allow_origins=_cors_origin_list,
+    allow_credentials=_cors_origins != "*",  # only allow credentials if not wildcard
     allow_methods=["*"],
     allow_headers=["*"],
 )
