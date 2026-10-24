@@ -1,7 +1,9 @@
-from neo4j.exceptions import Neo4jError, ServiceUnavailable
+import logging
 
 from app.db_models import Incident
 from app.graph import get_entity_blast_radius
+
+logger = logging.getLogger(__name__)
 
 
 def build_graph_context(incident: Incident) -> dict:
@@ -27,7 +29,12 @@ def build_graph_context(incident: Incident) -> dict:
     for host in hosts[:5]:
         try:
             subgraph = get_entity_blast_radius("host", host, incident.organization_id, hops=2)
-        except (Neo4jError, ServiceUnavailable):
+        except Exception:
+            # Any failure reaching Neo4j counts as "graph unavailable", not just
+            # Neo4jError/ServiceUnavailable: a deleted Aura instance raises
+            # ValueError (unresolvable host) and a blank/malformed NEO4J_URI raises
+            # ConfigurationError, and either would otherwise crash the investigation.
+            logger.warning("Neo4j graph context unavailable; investigating without it", exc_info=True)
             return {"available": False, "connected_hosts": [], "connected_incident_count": 0}
 
         for node in subgraph["nodes"]:

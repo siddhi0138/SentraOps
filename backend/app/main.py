@@ -66,7 +66,7 @@ from app.agents.runner import gather_investigation_inputs, mark_run_failed, pers
 from app.agents.memory import build_memory_context
 from app.ai import ChatConfigError, ChatProviderError, answer_question, explain_event, explain_incident, translate_query
 from app.confidence import compute_dual_evidence_confidence
-from app.graph import get_entity_blast_radius, get_full_graph, get_incident_subgraph, resync_graph
+from app.graph import get_driver, get_entity_blast_radius, get_full_graph, get_incident_subgraph, resync_graph
 from app.slack_bot import (
     handle_investigate_button,
     handle_review_action_button,
@@ -189,6 +189,20 @@ def _user_out(user: User) -> UserOut:
 
 @app.get("/health")
 def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.get("/health/neo4j")
+def health_neo4j() -> dict:
+    """Runs a trivial Neo4j query. The keep-alive workflow calls this so the
+    free Aura instance counts as active (Aura Free pauses and eventually
+    deletes idle databases), and it returns 503 when Neo4j is unreachable so
+    a failing keep-alive run shows red in the Actions tab."""
+    try:
+        with get_driver().session() as session:
+            session.run("RETURN 1").consume()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Neo4j unavailable: {type(exc).__name__}")
     return {"status": "ok"}
 
 
