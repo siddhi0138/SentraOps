@@ -186,7 +186,7 @@ Reproduce these yourself: register an org, `POST /simulate/phishing_ransomware`,
 | Layer | Stack |
 |---|---|
 | Backend | FastAPI, SQLAlchemy, Alembic, Celery + Redis |
-| AI / Agents | LangGraph, Groq (`llama-3.3-70b-versatile`), sentence-transformers over ONNX Runtime (local embeddings) |
+| AI / Agents | LangGraph, Groq (`openai/gpt-oss-120b`), sentence-transformers over ONNX Runtime (local embeddings) |
 | Data | PostgreSQL + pgvector, Neo4j |
 | Frontend | React, TypeScript, Vite, Tailwind CSS — mobile-first (collapsing sidebar/bottom tab bar, responsive tables, no page ever scrolls horizontally as a whole) |
 | Ops | Docker Compose, Kubernetes (Helm + Terraform), Render Blueprint, Prometheus, Grafana / Grafana Cloud |
