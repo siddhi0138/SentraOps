@@ -37,12 +37,14 @@ def _post_to_service(path: str, payload: dict) -> dict:
     as this one - confirmed by testing that a 30s timeout isn't enough for its
     cold-start wake (~30-60s), which was turning into a 500 here instead of
     just a slow-but-successful request. Retries also cover 429/5xx responses
-    when the service is busy. Waits grow 1s, 2s, 4s, 8s (or use the server's
-    Retry-After header if it sends one), then the error is raised."""
+    when the service is busy. The 429s come from in front of the service (its
+    own logs show only 200s), so they clear on their own after a while; waits
+    total about a minute (2s, 4s, 8s, 16s, 30s), or the server's Retry-After
+    header if it sends one, before the error is raised."""
     service_url = os.environ["EMBEDDINGS_SERVICE_URL"]
-    max_attempts = 5
+    waits = (2, 4, 8, 16, 30)
     last_error: Exception | None = None
-    for attempt in range(max_attempts):
+    for attempt in range(len(waits) + 1):
         try:
             response = httpx.post(f"{service_url}{path}", json=payload, timeout=90)
             response.raise_for_status()
@@ -53,11 +55,11 @@ def _post_to_service(path: str, payload: dict) -> dict:
             if not retryable:
                 raise
             retry_after = exc.response.headers.get("Retry-After", "")
-            delay = float(retry_after) if retry_after.replace(".", "", 1).isdigit() else 2**attempt
+            delay = float(retry_after) if retry_after.replace(".", "", 1).isdigit() else waits[min(attempt, len(waits) - 1)]
         except httpx.HTTPError as exc:
             last_error = exc
-            delay = 2**attempt
-        if attempt < max_attempts - 1:
+            delay = waits[min(attempt, len(waits) - 1)]
+        if attempt < len(waits):
             time.sleep(delay)
     raise last_error
 
