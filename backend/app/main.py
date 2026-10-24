@@ -17,8 +17,6 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from prometheus_fastapi_instrumentator import Instrumentator
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -131,19 +129,10 @@ app = FastAPI(title="SentraOps", version="0.2.0", lifespan=lifespan)
 # Groq-calling AI endpoints (cost/latency protection), not blanket-applied
 # to the whole API, since several frontend pages legitimately poll GET
 # endpoints every few seconds (AITeamPage, SOCCommandCenterPage).
-app.state.limiter = limiter
-
-
-def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
-    # slowapi's own default handler returns {"error": ...} - every other
-    # error response in this API uses FastAPI's {"detail": ...} shape
-    # (HTTPException), which the frontend's error parsing already expects.
-    response = JSONResponse({"detail": "Too many requests - please slow down and try again shortly."}, status_code=429)
-    return limiter._inject_headers(response, request.state.view_rate_limit)
-
-
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+# No middleware/exception-handler registration needed here - each
+# @limiter.limit(...) decorator below raises its own HTTPException(429)
+# directly (app/rate_limit.py), unlike the old slowapi-based setup which
+# needed SlowAPIMiddleware + a RateLimitExceeded handler wired in globally.
 
 # The frontend is a separate origin (its own dev server / nginx container),
 # so browser requests to this API need CORS. Comma-separated allowlist, or
