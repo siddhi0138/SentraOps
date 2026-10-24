@@ -1,4 +1,5 @@
 import os
+import time
 from functools import lru_cache
 
 MODEL_NAME = "all-MiniLM-L6-v2"
@@ -41,16 +42,29 @@ def embed_text(text: str) -> list[float]:
         # idle, same as this one - confirmed by testing that a 30s timeout
         # isn't enough for its cold-start wake (~30-60s), which was turning
         # into a 500 here instead of just a slow-but-successful request.
-        # One retry: the request that wakes it up can itself still time out
-        # right at the boundary, but the service is warm by the time we
-        # send the second one.
+        # Retries cover two cases: the cold-start timeout above, and 429/5xx
+        # responses when the service is busy. A simulate run embeds every
+        # event in a row, so a burst can hit a rate limit even though each
+        # single request is fine. Waits grow 1s, 2s, 4s, 8s (or use the
+        # server's Retry-After header if it sends one), then the error is raised.
+        max_attempts = 5
         last_error: Exception | None = None
-        for attempt in range(2):
+        for attempt in range(max_attempts):
             try:
                 response = httpx.post(f"{service_url}/embed", json={"text": text}, timeout=90)
                 response.raise_for_status()
                 return response.json()["vector"]
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                retryable = exc.response.status_code == 429 or exc.response.status_code >= 500
+                if not retryable:
+                    raise
+                retry_after = exc.response.headers.get("Retry-After", "")
+                delay = float(retry_after) if retry_after.replace(".", "", 1).isdigit() else 2**attempt
             except httpx.HTTPError as exc:
                 last_error = exc
+                delay = 2**attempt
+            if attempt < max_attempts - 1:
+                time.sleep(delay)
         raise last_error
     return _embed_local(text)
