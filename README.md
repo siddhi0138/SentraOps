@@ -87,14 +87,14 @@ Every agent's system prompt explicitly forbids inventing facts not present in wh
 - Knowledge Base — upload your own playbooks/runbooks/policy docs; chat retrieval searches them alongside events and incidents automatically, with a one-click sample set to try it immediately on a fresh org
 - Dual-evidence confidence scoring on every chat answer — cross-checks the RAG retrieval's own semantic-similarity score against whether the same entities are actually connected in the real Neo4j attack graph, instead of trusting either signal alone
 - Institutional memory: repeat hosts/users and similar past incidents feed into agent reasoning, not just the current incident in isolation
-- Live streaming investigation status over WebSockets
+- Live streaming investigation status over WebSockets — each agent's output appears as it finishes, whether the investigation runs on the Celery worker or (when no worker is reachable) in the backend itself
 - Learning loop — analyst feedback (accurate / false positive / missed) on past AI investigations, tracked as a real accuracy record over time
 
 **🕸️ Graph & Simulation**
-- Neo4j-backed attack graph — see how hosts/users/IPs connect across *every* incident, not just one at a time
+- Neo4j-backed attack graph — see how hosts/users/IPs connect across *every* incident, not just one at a time. If Neo4j isn't reachable, the same graph (Attack Graph, blast radius, Digital Twin, threat-intel graph) is served straight from Postgres, so those pages never go empty
 - Digital Twin — "what happens if this is compromised?" blast-radius simulation with an AI-narrated lateral-movement story
 - Attack Replay — step through a real incident's timeline chronologically, then through the AI's own investigation stages
-- Breach & Attack Simulation (BAS) — executes real MITRE ATT&CK techniques (14, spanning discovery, collection, credential-access, defense-evasion, and C2) inside a real, disposable Kubernetes pod your own deployment controls, not canned data; real command output flows through the same ingestion/correlation/AI-investigation pipeline as any other source
+- Breach & Attack Simulation (BAS) — executes real MITRE ATT&CK techniques (14, spanning discovery, collection, credential-access, defense-evasion, and C2) inside a real, disposable Kubernetes pod your own deployment controls, not canned data; real command output flows through the same ingestion/correlation/AI-investigation pipeline as any other source. With no cluster to run in (e.g. a free hosting plan), the page runs a clearly labeled simulated campaign instead — every event is tagged `[BAS-SIMULATED]`, the page shows a SIMULATED badge, and the API returns `mode: "simulated"`, so it is never mistaken for a real execution
 - **Simulate attack + correlate** (Dashboard) is real-with-fallback: tries a real BAS campaign first when your deployment has cluster access, and only falls back to a canned synthetic scenario when it doesn't — the response always says honestly which one ran, never presents synthetic data as real. Each run assembles a different, believable technique chain (a couple of real discovery techniques plus a random handful of the rest), so it's not the same canned attack on every click
 
 **💬 Slack Integration**
@@ -118,6 +118,24 @@ Every agent's system prompt explicitly forbids inventing facts not present in wh
 
 **📊 Observability**
 - Prometheus + Grafana out of the box, with app-specific metrics (investigation duration, AI call cost/latency, success rate) — not just generic HTTP metrics
+
+---
+
+## 🛟 Keeps working when free services fail
+
+Free tiers pause, throttle, or delete things. Every outside dependency has a fallback that runs *only* when the primary is unreachable, so nothing changes while everything is healthy and nothing crashes when it isn't:
+
+| If this is down… | …the app does this instead |
+|---|---|
+| **Neo4j** (deleted/paused Aura, bad `NEO4J_URI`) | Serves the attack graph, blast radius, Digital Twin and threat-intel graph from Postgres (same response shape). The AI investigation skips only the graph step. |
+| **Redis** | The AI Team's live investigation runs in a background thread of the backend and streams progress from memory; streamed log ingest is saved directly; rate limits use in-memory counters; a backup scheduler sends the daily Slack summaries. |
+| **Celery worker asleep** (free worker services sleep when idle) | Redis being up isn't enough — the backend pings for a worker (cached 30 s) and runs the job itself if none answers, so nothing sits queued. |
+| **Embeddings service** (sleeping or rate-limited) | Retries with backoff, then search falls back to keyword matching; data is always saved, and missing search vectors are added later (`POST /rag/reindex`, also run automatically after the next successful ingest). |
+| **A retired Groq model** | If the configured model returns `model_not_found`, the next one in `GROQ_MODEL_FALLBACKS` is tried and remembered. |
+| **Hosted Postgres pausing** (e.g. Neon) | Connections are health-checked before use and recycled every 4 minutes, so the first request after a pause reconnects instead of failing. |
+| **Kubernetes** (no cluster) | Breach & Attack Simulation runs a labeled simulated campaign (see above). |
+
+On the frontend, what a screen last showed (AI answers, briefings, chat, action results) is kept across refreshes, tab switches and closing the browser — stored locally for up to 7 days, and cleared on logout or when a different user signs in. Records themselves (events, incidents, runs) always load fresh from the server.
 
 ---
 
@@ -185,9 +203,9 @@ Reproduce these yourself: register an org, `POST /simulate/phishing_ransomware`,
 
 | Layer | Stack |
 |---|---|
-| Backend | FastAPI, SQLAlchemy, Alembic, Celery + Redis |
+| Backend | FastAPI, SQLAlchemy, Alembic, Celery + Redis (Redis and the worker are optional — see the resilience table) |
 | AI / Agents | LangGraph, Groq (`openai/gpt-oss-120b`), sentence-transformers over ONNX Runtime (local embeddings) |
-| Data | PostgreSQL + pgvector, Neo4j |
+| Data | PostgreSQL + pgvector (source of truth), Neo4j (optional graph store; Postgres serves the graph without it) |
 | Frontend | React, TypeScript, Vite, Tailwind CSS — mobile-first (collapsing sidebar/bottom tab bar, responsive tables, no page ever scrolls horizontally as a whole) |
 | Ops | Docker Compose, Kubernetes (Helm + Terraform), Render Blueprint, Prometheus, Grafana / Grafana Cloud |
 
@@ -222,8 +240,15 @@ On first open, register a new organization from the login screen, then click **S
 | Variable | Required | Notes |
 |---|---|---|
 | `GROQ_API_KEY` | For AI features | Free tier at console.groq.com. The rest of the app works without it. |
+| `GROQ_MODEL` | No | Defaults to `openai/gpt-oss-120b`. (Groq retired `llama-3.3-70b-versatile` on 2026-08-16 for free/developer accounts — see [Groq's deprecations](https://console.groq.com/docs/deprecations).) |
+| `GROQ_MODEL_FALLBACKS` | No | Comma-separated models tried in order when the configured one isn't found. Defaults to `openai/gpt-oss-120b,openai/gpt-oss-20b`; the first that works is remembered. |
 | `JWT_SECRET_KEY` | For production | Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `DATABASE_URL` | No | Defaults to the Postgres container in `docker-compose.yml` |
+| `REDIS_URL` | No | Celery broker, shared rate limits and live-progress channel. Optional on hosted deployments — the app falls back to in-process equivalents without it. |
+| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | No | Optional graph store. Without it, the graph pages are served from Postgres. |
+| `EMBEDDINGS_SERVICE_URL` | No | If set, embeddings come from the standalone embeddings service instead of loading the model in-process (needed on 512 MB hosts). |
+| `CORS_ORIGINS` | For hosted deployments | Comma-separated frontend origins, exact and without a trailing slash (e.g. `https://your-frontend.onrender.com`), or `*`. A request from an origin not listed is blocked by the browser with a CORS error. |
+| `SIMULATE_DEBUG` | No | Debugging aid only: when `1`, a failing `/simulate` returns its traceback in the 500 response. Leave it unset in production. |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET` | For Slack integration | From your own Slack app at api.slack.com/apps. The rest of the app works without it — "Connect to Slack" just won't appear functional until set. |
 | `FRONTEND_URL` | For Slack integration | Where Slack redirects/links back to after an OAuth install (e.g. `http://localhost:5173`) |
 | `VIRUSTOTAL_API_KEY` / `ABUSEIPDB_API_KEY` | No | Free tiers at virustotal.com / abuseipdb.com. Without them, the Threat Intel agent uses the platform's own local indicator table instead of live lookups. |
@@ -234,11 +259,15 @@ On first open, register a new organization from the login screen, then click **S
 
 Two free ways to put this on a real URL, both actually built and tested against this repo:
 
-**Render (`render.yaml` Blueprint)** — fully managed, no server to maintain. Push to a fork, connect it in Render's dashboard (**New → Blueprint**), and it provisions the backend, Celery worker, static frontend, a standalone embeddings service, and a metrics-forwarding agent from `render.yaml`. Point it at free managed Postgres (e.g. [Neon](https://neon.tech), with `CREATE EXTENSION vector;` for pgvector), [Neo4j AuraDB Free](https://neo4j.com/product/auradb/), and [Upstash Redis](https://upstash.com) instead of the Docker Compose containers. Render's free web service tier caps at 512MB RAM - too tight to run the local embedding model alongside LangGraph/Neo4j/everything else in one process, so `sentraops-embeddings` runs it in its own dedicated free service instead (`embed_text()` calls out to it over HTTP when `EMBEDDINGS_SERVICE_URL` is set, and loads the model in-process otherwise). Metrics forward to [Grafana Cloud](https://grafana.com)'s free tier (`monitoring/prometheus-agent/`) instead of self-hosting Prometheus/Grafana, since Render's free tier has no persistent disk.
+**Render (`render.yaml` Blueprint)** — fully managed, no server to maintain. Push to a fork, connect it in Render's dashboard (**New → Blueprint**), and it provisions the backend, Celery worker, static frontend, a standalone embeddings service, and a metrics-forwarding agent from `render.yaml`. Point it at free managed Postgres (e.g. [Neon](https://neon.tech), with `CREATE EXTENSION vector;` for pgvector), [Neo4j AuraDB Free](https://neo4j.com/product/auradb/), and (optionally) a free Redis ([Render Key Value](https://render.com/docs/key-value) or [Upstash](https://upstash.com)) instead of the Docker Compose containers. Neo4j and Redis are both optional here — without them the app serves the graph from Postgres and runs investigations in the backend itself. Render's free web service tier caps at 512MB RAM - too tight to run the local embedding model alongside LangGraph/Neo4j/everything else in one process, so `sentraops-embeddings` runs it in its own dedicated free service instead (`embed_text()` calls out to it over HTTP when `EMBEDDINGS_SERVICE_URL` is set, and loads the model in-process otherwise). Metrics forward to [Grafana Cloud](https://grafana.com)'s free tier (`monitoring/prometheus-agent/`) instead of self-hosting Prometheus/Grafana, since Render's free tier has no persistent disk.
 
 A few free-tier gotchas worth knowing before you deploy:
 - **Neo4j Aura's database username isn't always `neo4j`** - some instances use the instance ID itself as the username instead. Check the exact value on your instance's Connect / Developer Hub page rather than assuming the classic default.
-- **Free web services sleep after 15 minutes idle**, which costs a 30-60s cold start on the next request. A free scheduled ping (hitting `/health` every 10 minutes) keeps a given service warm - but since that uses close to the full 750 free hours/month by itself, only keep-alive the backend, not all five services, or you'll exhaust the shared monthly pool. This repo pings itself via [`.github/workflows/keep-alive.yml`](.github/workflows/keep-alive.yml) (unmetered on a public repo, and a failed run just shows red in the Actions tab instead of silently disabling itself). A third-party pinger like [cron-job.org](https://cron-job.org) works too, but its bot-check heuristics occasionally flag the ping itself as suspicious traffic and auto-disable the whole schedule after a few failures - worth having the Actions workflow as the one that can't quietly stop working unnoticed.
+- **Free web services sleep after 15 minutes idle**, which costs a 30-60s cold start on the next request, and all your free services share one pool of 750 instance-hours a month. So only the backend is kept warm all day: [`.github/workflows/keep-alive.yml`](.github/workflows/keep-alive.yml) pings it every 10 minutes (06:00-23:59 UTC) and, through it, runs a real query against Neo4j (`/health/neo4j`) and a write against Redis (`/health/redis`) so those free databases count as active. [`.github/workflows/keep-alive-daily.yml`](.github/workflows/keep-alive-daily.yml) wakes the embeddings service once a day instead of every 10 minutes, which would have kept a second service awake around the clock and used up the shared hours. A failed check shows as a warning in the Actions tab, since the app keeps working without either database. (GitHub pauses scheduled workflows on a repo with no recent activity, and scheduled runs can be delayed.) A third-party pinger like [cron-job.org](https://cron-job.org) works too, but its bot-check heuristics occasionally flag the ping itself as suspicious traffic and auto-disable the schedule.
+- **Free databases get paused, then deleted, when idle.** Neo4j Aura Free and Upstash can be; the keep-alive above is what prevents it. Neon (Postgres) pauses its compute after a few minutes idle and wakes on the next query — the app health-checks pooled connections so the first request after a pause reconnects instead of failing. If a database is deleted anyway, the fallbacks in [the resilience table](#-keeps-working-when-free-services-fail) keep the app working until you create a replacement.
+- **The free Celery worker is a web service, so it sleeps too.** The backend checks that a worker actually answers before queueing a job and runs it in-process if not; keeping the worker awake around the clock would need a paid always-on instance.
+- **Models get retired.** Groq removed `llama-3.3-70b-versatile` for free accounts in August 2026; every AI call then returned `model_not_found`. The model fallback list covers this, but check [Groq's deprecations page](https://console.groq.com/docs/deprecations) now and then.
+- **Health endpoints:** `/health` (always), `/health/neo4j` and `/health/redis` (a real query/write; `503` if unreachable).
 - **Grafana Cloud's dashboard panels don't provision themselves** - connecting the metrics agent only gets data flowing into storage. You still need to manually import `monitoring/grafana/provisioning/dashboards/json/cybersentinel.json` (Grafana Cloud → Dashboards → New → Import) and point each panel at the Prometheus data source Grafana Cloud auto-created for you (not the literal `"Prometheus"` placeholder the JSON ships with).
 
 **Self-hosted + Cloudflare Tunnel** — run `docker compose up` on any machine with a public internet connection (no port-forwarding, no public IP needed) and expose it via a free [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/). No memory ceiling, the complete app with no trade-offs, but tied to that machine staying on. A quick tunnel (`cloudflared tunnel --url ...`) works instantly but gives an ephemeral URL that changes on restart; a named tunnel with your own domain's DNS pointed at Cloudflare's nameservers gives a permanent one.
@@ -264,6 +293,7 @@ frontend/   React + Vite app
 deploy/     Helm chart + Terraform (Kind cluster) for a real K8s deployment
 monitoring/ Prometheus + Grafana provisioning, plus a remote-write agent for Grafana Cloud
 render.yaml Render Blueprint - backend, Celery worker, static frontend, embeddings service, metrics agent
+.github/    CI, security scans, and the keep-alive pings for the free-tier services
 ```
 
 ## 🧪 Tests
@@ -276,7 +306,7 @@ cd backend && pytest
 cd frontend && npm run build   # typecheck + production build
 ```
 
-578 backend tests, **90% line coverage** (`pytest --cov=app`, tool-measured) —
+615 backend tests, **89% line coverage** (`pytest --cov=app`, tool-measured) —
 including the FastAPI route layer itself (`app/main.py`, 89%), not just
 isolated logic. The one file at 0% (`app/embeddings_service.py`) is the
 entrypoint for a separate microservice that runs as its own Render
