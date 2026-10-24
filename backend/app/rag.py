@@ -1,7 +1,23 @@
 from sqlalchemy.orm import Session
 
 from app.db_models import Embedding
-from app.embeddings import embed_text
+from app.embeddings import embed_text, embed_texts
+
+
+def store_embeddings(db: Session, organization_id: int, items: list[tuple[str, int | None, str]]) -> None:
+    """Batch version of store_embedding: items are (content_type, content_id, text).
+    Makes one embedding call for the whole list instead of one per item."""
+    items = [item for item in items if item[2] and item[2].strip()]
+    if not items:
+        return
+    vectors = embed_texts([text for _, _, text in items])
+    for (content_type, content_id, text), vector in zip(items, vectors):
+        db.add(
+            Embedding(
+                organization_id=organization_id, content_type=content_type, content_id=content_id, text=text,
+                vector=vector,
+            )
+        )
 
 
 def store_embedding(db: Session, organization_id: int, content_type: str, content_id: int | None, text: str) -> None:

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db_models import Asset, Event, RawLog
 from app.parsers import get_parser
-from app.rag import store_embedding
+from app.rag import store_embeddings
 
 
 def _serialize_raw(raw: Any) -> str:
@@ -103,8 +103,9 @@ def ingest(db: Session, organization_id: int, source_type: str, raw_items: list[
         db.flush()
         events.append(event)
         _upsert_asset(db, organization_id, normalized["host"], normalized["timestamp"])
-        store_embedding(db, organization_id, "event", event.id, _event_embedding_text(event))
 
+    # One embedding call for the whole batch, not one per event - see rag.store_embeddings.
+    store_embeddings(db, organization_id, [("event", event.id, _event_embedding_text(event)) for event in events])
     db.commit()
     for event in events:
         db.refresh(event)
