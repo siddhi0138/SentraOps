@@ -7,7 +7,7 @@ import bcrypt
 import jwt
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -42,6 +42,19 @@ class Role(str, Enum):
     auditor = "auditor"
 
 
+# bcrypt only uses the first 72 bytes of a password, and bcrypt 5 raises ValueError for
+# anything longer instead of truncating - which used to surface as a 500 (with no CORS
+# headers, so the browser showed a CORS error) when someone signed up with a long
+# password-manager password. Reject it up front with a clear message instead.
+MAX_PASSWORD_BYTES = 72
+
+
+def _check_password_length(password: str) -> str:
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes long (about {MAX_PASSWORD_BYTES} characters)")
+    return password
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     # Only enforced at registration, not login - an existing account created
@@ -54,11 +67,15 @@ class UserCreate(BaseModel):
     # and makes the creator an admin rather than a viewer.
     organization_slug: str = Field(min_length=1)
 
+    _password_length = field_validator("password")(_check_password_length)
+
 
 class OrganizationCreate(BaseModel):
     organization_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
     password: str = Field(min_length=8)
+
+    _password_length = field_validator("password")(_check_password_length)
 
 
 class UserLogin(BaseModel):
@@ -95,7 +112,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+    # Only the first 72 bytes ever matter to bcrypt (older versions truncated silently,
+    # so an account created that way still verifies); bcrypt 5 raises on longer input,
+    # which would turn a login attempt into a 500.
+    return bcrypt.checkpw(password.encode()[:MAX_PASSWORD_BYTES], hashed.encode())
 
 
 def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> str:

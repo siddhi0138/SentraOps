@@ -207,3 +207,56 @@ def test_owner_can_grant_and_revoke_owner_role(client, test_org, register_and_lo
     response = client.patch(f"/users/{user_id}/role", json={"role": "owner"}, headers=owner_headers)
     assert response.status_code == 200
     assert response.json()["role"] == "owner"
+
+
+def test_signup_with_too_long_a_password_is_rejected_with_a_clear_message_not_a_500(client):
+    # bcrypt only handles 72 bytes; this used to crash the request (a 500 with no CORS
+    # headers, which browsers report as a CORS error).
+    response = client.post(
+        "/organizations",
+        json={"organization_name": "Long Pass Co", "email": "long@example.com", "password": "x" * 80},
+    )
+    assert response.status_code == 422
+    assert "at most 72 bytes" in response.text
+
+
+def test_password_limit_counts_bytes_not_characters(client):
+    # 40 two-byte characters = 80 bytes: too long even though it is only 40 characters.
+    response = client.post(
+        "/organizations",
+        json={"organization_name": "Bytes Co", "email": "bytes@example.com", "password": "é" * 40},
+    )
+    assert response.status_code == 422
+
+    ok = client.post(
+        "/organizations",
+        json={"organization_name": "Bytes Co", "email": "bytes@example.com", "password": "x" * 72},
+    )
+    assert ok.status_code == 200
+
+
+def test_register_into_existing_org_also_rejects_a_too_long_password(client, test_org):
+    org_slug, _headers = test_org
+    response = client.post(
+        "/auth/register",
+        json={"email": "joiner@example.com", "password": "y" * 80, "organization_slug": org_slug},
+    )
+    assert response.status_code == 422
+
+
+def test_login_with_a_too_long_password_is_a_normal_401_not_a_500(client):
+    client.post(
+        "/organizations",
+        json={"organization_name": "Login Co", "email": "login@example.com", "password": "Secret123!"},
+    )
+    response = client.post("/auth/login", json={"email": "login@example.com", "password": "z" * 200})
+    assert response.status_code == 401
+
+
+def test_a_password_stored_after_truncation_still_verifies():
+    from app.auth import hash_password, verify_password
+
+    stored = hash_password("a" * 72)  # what older bcrypt versions stored for any longer password
+    assert verify_password("a" * 72, stored)
+    assert verify_password("a" * 100, stored)  # same first 72 bytes: old behavior, no crash
+    assert not verify_password("b" * 72, stored)
