@@ -90,23 +90,33 @@ export function DashboardPage() {
       const sim = await api.simulate('phishing_ransomware')
       const modeLabel = sim.mode === 'real' ? 'Ran a real attack campaign against a live sandboxed pod' : 'Simulated an attack (synthetic data)'
       const result = await api.correlate()
-      setActionMessage(`${modeLabel} and created ${result.incidents_created} incident(s). Running AI investigation…`)
+      const created = `${modeLabel} and created ${result.incidents_created} incident(s).`
+      setActionMessage(created)
 
+      // The AI investigation (six agents, one after another) is the slow part, so start it in
+      // the background and return right away instead of waiting for it. The AI Team page
+      // shows each agent's output as it finishes.
       const topIncident = [...result.incidents].sort((a, b) => b.risk_score - a.risk_score)[0]
       if (topIncident) {
-        await api.investigateIncident(topIncident.id)
-        setActionMessage(`${modeLabel}, created ${result.incidents_created} incident(s), and ran a full AI investigation on "${topIncident.title}".`)
+        try {
+          await api.investigateIncidentLive(topIncident.id)
+          setActionMessage(
+            `${created} The AI investigation of "${topIncident.title}" is running in the background - ` +
+              'open the AI Team page to watch each agent.'
+          )
+        } catch {
+          setActionMessage(`${created} The AI investigation could not be started - open the incident to run it.`)
+        }
       }
 
-      await api.syncGraph().catch(() => {})
+      // Not awaited: the graph can finish syncing after the button is done.
+      void api.syncGraph().catch(() => {})
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : 'Action failed')
     } finally {
       // Always refresh: events and incidents are saved by the earlier steps even
       // if a later one (like the AI investigation) fails, so they should show up.
       await loadData().catch(() => {})
-      // Don't leave "Running AI investigation…" showing (and saved) once the run has ended.
-      setActionMessage((prev) => (prev ? prev.replace(' Running AI investigation…', '') : prev))
       setWorking(false)
     }
   }
