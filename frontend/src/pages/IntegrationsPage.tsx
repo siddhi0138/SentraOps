@@ -99,7 +99,7 @@ function ConfigForm({
   return (
     <div className="space-y-2">
       {fields.map((field) => (
-        <input
+        <input name={field} aria-label={field}
           key={field}
           placeholder={field}
           value={config[field] ?? ''}
@@ -142,7 +142,7 @@ function ChannelField({ connector, onSaved, roleKey, label, placeholder }: {
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <span className="text-xs text-muted-foreground sm:shrink-0 sm:w-64">{label}:</span>
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <input name="value" aria-label={label}
           placeholder={placeholder}
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -261,7 +261,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
       {canCreate && (
         <div className="panel p-4 space-y-3">
           <div className="flex gap-2">
-            <select
+            <select name="pluginKey" aria-label="Plugin key"
               value={pluginKey}
               onChange={(e) => {
                 setPluginKey(e.target.value)
@@ -276,7 +276,7 @@ function ConnectorsSection({ canCreate, canOperate }: { canCreate: boolean; canO
               ))}
             </select>
             {selectedPlugin?.auth_type !== 'oauth' && (
-              <input
+              <input name="name" aria-label="Name"
                 placeholder="Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -398,7 +398,7 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
       {canCreate && (
         <div className="panel p-4 space-y-3">
           <div className="flex gap-2">
-            <select
+            <select name="pluginKey" aria-label="Plugin key"
               value={pluginKey}
               onChange={(e) => {
                 setPluginKey(e.target.value)
@@ -412,7 +412,7 @@ function ResponseActionsSection({ canCreate }: { canCreate: boolean }) {
                 </option>
               ))}
             </select>
-            <input
+            <input name="name" aria-label="Name"
               placeholder="Name"
               value={name}
               onChange={(e) => setName(e.target.value)}

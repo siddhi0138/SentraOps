@@ -60,7 +60,7 @@ function UsersSection({ currentUserId, canEdit }: { currentUserId: number | unde
               </p>
             </div>
             {canEdit ? (
-              <select
+              <select name="role" aria-label="Role"
                 value={u.role}
                 onChange={(e) => void changeRole(u.id, e.target.value as Role)}
                 disabled={busyId === u.id}
@@ -122,7 +122,7 @@ function OrgSettingsSection({ org, isAdmin, onChange }: { org: OrganizationSetti
       {isAdmin ? (
         <>
           <div className="flex gap-2 max-w-md">
-            <input
+            <input name="name" aria-label="Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground"
@@ -218,7 +218,7 @@ function ApiKeysSection() {
       )}
 
       <div className="flex gap-2 max-w-md">
-        <input
+        <input name="keyNameE" aria-label="Key name (e.g. CI Pipeline)"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="Key name (e.g. CI Pipeline)"

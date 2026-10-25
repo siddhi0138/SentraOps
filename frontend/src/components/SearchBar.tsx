@@ -37,7 +37,7 @@ export function SearchBar() {
 
   return (
     <div ref={containerRef} className="relative w-64">
-      <input
+      <input name="searchEverything" aria-label="Search everything..."
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => q.trim().length >= 2 && setOpen(true)}

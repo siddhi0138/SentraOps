@@ -42,7 +42,7 @@ export function IncidentsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-foreground">Incidents</h1>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          <select
+          <select name="status" aria-label="Status"
             value={status}
             onChange={(e) => setStatus(e.target.value)}
             className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -51,7 +51,7 @@ export function IncidentsPage() {
             <option value="open">Open</option>
             <option value="closed">Closed</option>
           </select>
-          <select
+          <select name="riskLevel" aria-label="Risk level"
             value={riskLevel}
             onChange={(e) => setRiskLevel(e.target.value)}
             className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"

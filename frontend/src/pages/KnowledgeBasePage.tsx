@@ -110,13 +110,13 @@ export function KnowledgeBasePage() {
 
       {canAct && (
         <div className="panel p-4 flex flex-wrap items-center gap-3">
-          <input
+          <input name="documentTitleOptional" aria-label="Document title (optional - defaults to filename)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Document title (optional - defaults to filename)"
             className="flex-1 min-w-[220px] rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
           />
-          <input
+          <input name="file" aria-label="Upload file"
             ref={fileInputRef}
             type="file"
             accept=".txt,.md,text/plain,text/markdown"

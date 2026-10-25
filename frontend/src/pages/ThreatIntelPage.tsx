@@ -116,13 +116,13 @@ export function ThreatIntelPage() {
       {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex flex-wrap gap-3">
-        <input
+        <input name="searchIndicator" aria-label="Search indicator..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search indicator..."
           className="flex-1 min-w-[200px] rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
         />
-        <select
+        <select name="type" aria-label="Type"
           value={type}
           onChange={(e) => setType(e.target.value as ThreatIndicatorType | '')}
           className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground"

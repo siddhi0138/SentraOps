@@ -112,14 +112,14 @@ export function EventsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-foreground">Events</h1>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          <input
+          <input name="searchUserHost" aria-label="Search user, host, IP, message..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search user, host, IP, message..."
             className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <div className="grid grid-cols-2 gap-2 sm:contents">
-            <select
+            <select name="severity" aria-label="Severity"
               value={severity}
               onChange={(e) => setSeverity(e.target.value)}
               className="rounded-lg bg-secondary border border-border px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -142,7 +142,7 @@ export function EventsPage() {
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <input
+        <input name="aiSearch" aria-label="Ask AI about your events"
           value={nlQuestion}
           onChange={(e) => setNlQuestion(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && runNlSearch()}

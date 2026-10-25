@@ -37,8 +37,8 @@ export function LoginPage() {
         {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
 
         <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-muted-foreground">Email</label>
-          <input
+          <label htmlFor="login-email" className="text-xs uppercase tracking-wide text-muted-foreground">Email</label>
+          <input id="login-email" name="email"
             required
             type="email"
             value={email}
@@ -47,8 +47,8 @@ export function LoginPage() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-muted-foreground">Password</label>
-          <input
+          <label htmlFor="login-password" className="text-xs uppercase tracking-wide text-muted-foreground">Password</label>
+          <input id="login-password" name="password"
             required
             type="password"
             value={password}

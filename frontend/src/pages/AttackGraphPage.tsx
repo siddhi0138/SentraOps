@@ -105,8 +105,8 @@ export function AttackGraphPage() {
 
       <div className="panel p-4 flex flex-wrap items-end gap-3">
         <div>
-          <label className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Entity type</label>
-          <select
+          <label htmlFor="attackgraph-entity-type" className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Entity type</label>
+          <select id="attackgraph-entity-type" name="entityType"
             value={entityType}
             onChange={(e) => setEntityType(e.target.value as EntityType)}
             className="rounded bg-secondary border border-border px-2 py-1.5 text-sm text-foreground"
@@ -117,8 +117,8 @@ export function AttackGraphPage() {
           </select>
         </div>
         <div className="flex-1 min-w-[180px]">
-          <label className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Value</label>
-          <input
+          <label htmlFor="attackgraph-value" className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Value</label>
+          <input id="attackgraph-value" name="eGFinance"
             value={entityValue}
             onChange={(e) => setEntityValue(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -127,8 +127,8 @@ export function AttackGraphPage() {
           />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Hops</label>
-          <select
+          <label htmlFor="attackgraph-hops" className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Hops</label>
+          <select id="attackgraph-hops" name="hops"
             value={hops}
             onChange={(e) => setHops(Number(e.target.value))}
             className="rounded bg-secondary border border-border px-2 py-1.5 text-sm text-foreground"

@@ -58,7 +58,7 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
     <tr className="bg-secondary/40">
       <td className="px-4 py-2 text-foreground">{asset.host}</td>
       <td className="px-4 py-2">
-        <select
+        <select name="criticality" aria-label="Criticality"
           value={criticality}
           onChange={(e) => setCriticality(e.target.value as Severity)}
           className="rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground"
@@ -71,13 +71,13 @@ function AssetRow({ asset, canEdit, onSaved }: { asset: Asset; canEdit: boolean;
         </select>
       </td>
       <td className="px-4 py-2">
-        <input value={department} onChange={(e) => setDepartment(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
+        <input name="department" aria-label="Department" value={department} onChange={(e) => setDepartment(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
       </td>
       <td className="px-4 py-2">
-        <input value={owner} onChange={(e) => setOwner(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
+        <input name="owner" aria-label="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
       </td>
       <td className="px-4 py-2">
-        <input value={os} onChange={(e) => setOs(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
+        <input name="os" aria-label="OS" value={os} onChange={(e) => setOs(e.target.value)} className="w-28 rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground" />
       </td>
       <td className="px-4 py-2 text-muted-foreground">{asset.event_count}</td>
       <td className="px-4 py-2 whitespace-nowrap text-muted-foreground font-mono text-xs">{asset.last_seen}</td>
@@ -138,7 +138,7 @@ export function AssetsPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-lg font-semibold text-foreground">Assets</h1>
-        <input
+        <input name="searchHostDepartment" aria-label="Search host, department, owner..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search host, department, owner..."

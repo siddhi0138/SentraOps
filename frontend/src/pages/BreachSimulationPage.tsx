@@ -115,7 +115,7 @@ export function BreachSimulationPage() {
           {techniques.map((t) => (
             <label key={t.id} className="p-4 flex items-center justify-between gap-4 cursor-pointer">
               <div className="flex items-center gap-3 min-w-0">
-                <input
+                <input name="technique"
                   type="checkbox"
                   checked={selected.has(t.id)}
                   onChange={() => toggle(t.id)}

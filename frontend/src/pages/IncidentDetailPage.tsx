@@ -238,7 +238,7 @@ export function IncidentDetailPage() {
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Priority</p>
             {canAct ? (
-              <select
+              <select name="priority" aria-label="Priority"
                 value={incident.priority}
                 onChange={(e) => handlePriorityChange(e.target.value as Severity)}
                 className="rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground"
@@ -256,7 +256,7 @@ export function IncidentDetailPage() {
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Assignee</p>
             {canAct ? (
-              <select
+              <select name="assignee" aria-label="Assignee"
                 value={incident.assignee_id ?? ''}
                 onChange={(e) => handleAssigneeChange(e.target.value)}
                 className="rounded bg-secondary border border-border px-2 py-1 text-xs text-foreground max-w-full"
@@ -481,7 +481,7 @@ export function IncidentDetailPage() {
         </div>
         {canAct && (
           <div className="flex gap-2">
-            <input
+            <input name="addAComment" aria-label="Add a comment..."
               value={commentBody}
               onChange={(e) => setCommentBody(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}

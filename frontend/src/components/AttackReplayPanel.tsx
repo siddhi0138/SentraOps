@@ -150,7 +150,7 @@ export function AttackReplayPanel({ incidentId, timeline }: Props) {
           </p>
         </div>
         {runs.length > 1 && (
-          <select
+          <select name="selectedRun" aria-label="Selected run"
             value={selectedRun?.id ?? ''}
             onChange={(e) => void selectRun(Number(e.target.value))}
             className="text-xs rounded-lg border border-border bg-card px-2 py-1.5 text-foreground"

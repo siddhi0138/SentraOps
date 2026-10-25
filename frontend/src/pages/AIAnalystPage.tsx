@@ -182,7 +182,7 @@ export function AIAnalystPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="mt-4 flex gap-2">
-        <input
+        <input name="askTheAi" aria-label="Ask the AI analyst..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask the AI analyst..."

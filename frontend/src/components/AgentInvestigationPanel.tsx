@@ -440,7 +440,7 @@ export function AgentInvestigationPanel({ incidentId, canAct }: Props) {
           </div>
           {canAct && (
             <div className="space-y-2">
-              <textarea
+              <textarea name="optionalNoteEspecially" aria-label="Optional note - especially useful for false positives or missed detections"
                 value={feedbackNote}
                 onChange={(e) => setFeedbackNote(e.target.value)}
                 placeholder="Optional note - especially useful for false positives or missed detections"

@@ -116,8 +116,8 @@ export function DigitalTwinPage() {
 
       <div className="panel p-4 flex flex-wrap items-end gap-3">
         <div>
-          <label className="block text-xs text-muted-foreground mb-1">Entity type</label>
-          <select
+          <label htmlFor="digitaltwin-entity-type" className="block text-xs text-muted-foreground mb-1">Entity type</label>
+          <select id="digitaltwin-entity-type" name="entityType"
             value={entityType}
             onChange={(e) => patchTwin({ entityType: e.target.value as EntityType })}
             className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground"
@@ -128,8 +128,8 @@ export function DigitalTwinPage() {
           </select>
         </div>
         <div className="flex-1 min-w-[160px]">
-          <label className="block text-xs text-muted-foreground mb-1">Value</label>
-          <input
+          <label htmlFor="digitaltwin-value" className="block text-xs text-muted-foreground mb-1">Value</label>
+          <input id="digitaltwin-value" name="eGFinance"
             value={entityValue}
             onChange={(e) => patchTwin({ entityValue: e.target.value })}
             onKeyDown={(e) => e.key === 'Enter' && void handleSimulate()}
@@ -138,8 +138,8 @@ export function DigitalTwinPage() {
           />
         </div>
         <div>
-          <label className="block text-xs text-muted-foreground mb-1">Hops</label>
-          <input
+          <label htmlFor="digitaltwin-hops" className="block text-xs text-muted-foreground mb-1">Hops</label>
+          <input id="digitaltwin-hops" name="hops"
             type="number"
             min={1}
             max={4}

@@ -70,8 +70,8 @@ export function RegisterPage() {
 
         {mode === 'create' ? (
           <div className="space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground">Organization name</label>
-            <input
+            <label htmlFor="register-organization-name" className="text-xs uppercase tracking-wide text-muted-foreground">Organization name</label>
+            <input id="register-organization-name" name="acmeCorp"
               required
               value={organizationName}
               onChange={(e) => setOrganizationName(e.target.value)}
@@ -81,8 +81,8 @@ export function RegisterPage() {
           </div>
         ) : (
           <div className="space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground">Invite code</label>
-            <input
+            <label htmlFor="register-invite-code" className="text-xs uppercase tracking-wide text-muted-foreground">Invite code</label>
+            <input id="register-invite-code" name="acmeCorp"
               required
               value={organizationSlug}
               onChange={(e) => setOrganizationSlug(e.target.value)}
@@ -93,8 +93,8 @@ export function RegisterPage() {
         )}
 
         <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-muted-foreground">Email</label>
-          <input
+          <label htmlFor="register-email" className="text-xs uppercase tracking-wide text-muted-foreground">Email</label>
+          <input id="register-email" name="email"
             required
             type="email"
             value={email}
@@ -103,8 +103,8 @@ export function RegisterPage() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-muted-foreground">Password</label>
-          <input
+          <label htmlFor="register-password" className="text-xs uppercase tracking-wide text-muted-foreground">Password</label>
+          <input id="register-password" name="password"
             required
             minLength={8}
             type="password"

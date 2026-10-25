@@ -208,7 +208,7 @@ export function SOCCommandCenterPage() {
         <h2 className="text-sm font-medium text-foreground mb-3">Shift Notes</h2>
         {canAct && (
           <div className="flex gap-2 mb-3">
-            <input
+            <input name="leaveANote" aria-label="Leave a note for the next shift..."
               value={noteBody}
               onChange={(e) => setNoteBody(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && postNote()}
