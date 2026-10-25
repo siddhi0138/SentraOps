@@ -13,6 +13,8 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.mkdtemp()}/sentraops
 # broker/worker - must be set before app.celery_app is imported (by
 # app.main -> app.tasks) since it's read once at module load time.
 os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
+# Background retry of missing search vectors would start threads that outlive a test.
+os.environ.setdefault("EMBEDDING_BACKFILL_RETRY", "false")
 
 from unittest.mock import MagicMock
 

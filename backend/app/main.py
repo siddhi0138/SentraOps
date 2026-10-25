@@ -96,7 +96,7 @@ from app.knowledge_base import seed_sample_documents
 from app.plugins import registry as plugin_registry
 from app.progress import REDIS_URL, channel_name, local_events_since
 from app.rag import search as rag_search, store_embeddings
-from app.reindex import backfill_missing_embeddings
+from app.reindex import backfill_missing_embeddings, schedule_backfill
 from app.rate_limit import limiter
 from app.simulate import get_scenario
 from app import bas
@@ -2495,6 +2495,10 @@ def chat(
         raise HTTPException(status_code=422, detail="question cannot be empty")
 
     evidence = rag_search(db, user.organization_id, payload.question, k=8)
+    if not any(item["content_type"] in ("event", "incident") for item in evidence):
+        # Only knowledge-base text came back: events or incidents may be missing their
+        # search vectors. Fill them in the background so the next question finds them.
+        schedule_backfill(user.organization_id, delays=(1, 30, 120))
 
     try:
         answer = answer_question(payload.question, evidence)

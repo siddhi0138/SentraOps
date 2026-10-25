@@ -38,3 +38,58 @@ def backfill_missing_embeddings(db: Session, organization_id: int, limit: int = 
         return 0
     db.commit()
     return len(items)
+
+
+# --- self-healing: retry the backfill in the background -----------------------------
+# A write that couldn't be embedded (service asleep or rate-limited) is saved without its
+# vector. Rather than wait for someone to call /rag/reindex, retry in the background after
+# the service has had time to wake up.
+
+import logging
+import os
+import threading
+import time
+
+logger = logging.getLogger(__name__)
+
+_in_flight: set[int] = set()
+_in_flight_lock = threading.Lock()
+
+
+def has_missing(db: Session, organization_id: int) -> bool:
+    return bool(_missing(db, Event, "event", organization_id, 1) or _missing(db, Incident, "incident", organization_id, 1))
+
+
+def _backfill_loop(organization_id: int, delays, session_factory, sleep=time.sleep) -> None:
+    try:
+        for delay in delays:
+            sleep(delay)
+            db = session_factory()
+            try:
+                if not has_missing(db, organization_id):
+                    return
+                backfill_missing_embeddings(db, organization_id)
+            except Exception:
+                logger.warning("Background embedding backfill failed", exc_info=True)
+            finally:
+                db.close()
+    finally:
+        with _in_flight_lock:
+            _in_flight.discard(organization_id)
+
+
+def schedule_backfill(organization_id: int, delays=(20, 60, 180)) -> bool:
+    """Starts a background thread that retries filling in missing vectors after each delay,
+    stopping as soon as nothing is missing. At most one per organization at a time.
+    Returns whether a thread was started."""
+    if os.environ.get("EMBEDDING_BACKFILL_RETRY", "true").lower() != "true":
+        return False
+    with _in_flight_lock:
+        if organization_id in _in_flight:
+            return False
+        _in_flight.add(organization_id)
+
+    from app.db import SessionLocal
+
+    threading.Thread(target=_backfill_loop, args=(organization_id, delays, SessionLocal), daemon=True).start()
+    return True

@@ -160,3 +160,74 @@ def test_search_always_includes_exact_keyword_hits_next_to_vector_hits(db_sessio
     results = search(db_session, org_id, "what happened on zeta-db-77", k=6)
     assert any(r["content_type"] == "event" and "zeta-db-77" in r["text"] for r in results)
     assert len(results) <= 6
+
+
+# --- background retry of missing search vectors -----------------------------------------
+
+def _event(db_session, org_id, host="retry-host-1"):
+    from datetime import datetime, timezone
+
+    from app.db_models import Event
+
+    event = Event(organization_id=org_id, timestamp=datetime.now(timezone.utc), host=host, username="u", event_type="login_failed",
+                  severity="low", message="Failed login", source_type="generic")
+    db_session.add(event)
+    db_session.commit()
+    return event
+
+
+def test_backfill_loop_fills_in_vectors_and_stops_when_nothing_is_missing(db_session, org_id):
+    from app.db_models import Embedding
+    from app.reindex import _backfill_loop, has_missing
+
+    _event(db_session, org_id)
+    assert has_missing(db_session, org_id)
+
+    sleeps = []
+    _backfill_loop(org_id, (5, 10, 20), lambda: db_session, sleep=sleeps.append)
+
+    # First attempt filled it in; the second delay found nothing missing and stopped.
+    assert sleeps == [5, 10]
+    assert db_session.query(Embedding).filter_by(content_type="event").count() == 1
+    assert not has_missing(db_session, org_id)
+
+
+def test_backfill_loop_keeps_trying_while_the_service_is_down_and_releases_the_org(db_session, org_id):
+    from unittest.mock import patch
+
+    from app.reindex import _backfill_loop, _in_flight
+
+    _event(db_session, org_id)
+    _in_flight.add(org_id)
+    sleeps = []
+    with patch("app.rag.embed_texts", side_effect=RuntimeError("429")):
+        _backfill_loop(org_id, (1, 2, 3), lambda: db_session, sleep=sleeps.append)
+
+    assert sleeps == [1, 2, 3]  # tried every delay
+    assert org_id not in _in_flight  # a later call can start a new retry
+
+
+def test_schedule_backfill_does_nothing_when_disabled_and_only_one_runs_per_org(monkeypatch):
+    from unittest.mock import patch
+
+    from app import reindex
+
+    monkeypatch.setenv("EMBEDDING_BACKFILL_RETRY", "false")
+    assert reindex.schedule_backfill(4242) is False
+
+    monkeypatch.setenv("EMBEDDING_BACKFILL_RETRY", "true")
+    with patch.object(reindex.threading, "Thread") as thread:
+        assert reindex.schedule_backfill(4242) is True
+        assert reindex.schedule_backfill(4242) is False  # already in flight
+    assert thread.call_count == 1
+    reindex._in_flight.discard(4242)
+
+
+def test_failed_embedding_write_schedules_a_retry(db_session, org_id):
+    from unittest.mock import patch
+
+    from app.rag import store_embeddings
+
+    with patch("app.rag.embed_texts", side_effect=RuntimeError("429")), patch("app.reindex.schedule_backfill") as schedule:
+        assert store_embeddings(db_session, org_id, [("event", 1, "some text")]) is False
+    schedule.assert_called_once_with(org_id)

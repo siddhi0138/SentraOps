@@ -26,6 +26,9 @@ def store_embeddings(db: Session, organization_id: int, items: list[tuple[str, i
         # or sleep. Saving the data matters more than its search vector, which
         # reindex.backfill_missing_embeddings adds later.
         logger.warning("Embedding service unavailable; saving %d item(s) without search vectors", len(items), exc_info=True)
+        from app.reindex import schedule_backfill  # imported here: reindex imports this module
+
+        schedule_backfill(organization_id)
         return False
     for (content_type, content_id, text), vector in zip(items, vectors):
         db.add(
