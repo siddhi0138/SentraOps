@@ -142,3 +142,21 @@ def test_simulate_succeeds_without_vectors_then_reindex_fills_them_in(client, an
     assert reindex.json()["embedded"] > 0
     db_session.expire_all()
     assert db_session.query(Embedding).count() == reindex.json()["embedded"]
+
+
+def test_search_always_includes_exact_keyword_hits_next_to_vector_hits(db_session, org_id):
+    from app.db_models import Embedding, Event
+    from app.rag import search
+
+    # Plenty of unrelated embedded text, so a vector search returns k unrelated rows...
+    for i in range(8):
+        store_embedding(db_session, org_id, "knowledge_chunk", 100 + i, f"Quarterly finance report number {i} for the sales department")
+    # ...and one event that only a literal match on its host name would find (it has no vector).
+    from datetime import datetime, timezone
+    db_session.add(Event(organization_id=org_id, timestamp=datetime.now(timezone.utc), host="zeta-db-77", username="mallory",
+                         event_type="login_failed", severity="high", message="Repeated failed login", source_type="generic"))
+    db_session.commit()
+
+    results = search(db_session, org_id, "what happened on zeta-db-77", k=6)
+    assert any(r["content_type"] == "event" and "zeta-db-77" in r["text"] for r in results)
+    assert len(results) <= 6

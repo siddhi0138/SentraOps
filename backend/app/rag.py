@@ -97,6 +97,30 @@ def _keyword_search(db: Session, organization_id: int, query: str, content_type:
 
 
 def search(db: Session, organization_id: int, query: str, content_type: str | None = None, k: int = 5) -> list[dict]:
+    """Vector search, plus a few exact keyword hits. Meaning-based search is good at
+    "what looks like lateral movement" but can miss a literal host name, user or IP the
+    analyst typed; keyword matching finds those reliably. Up to k//2 slots (at most 3)
+    go to keyword hits the vector search didn't already return, vector results first."""
+    results = _vector_search(db, organization_id, query, content_type, k)
+    reserved = min(3, k // 2)
+    if reserved == 0:
+        return results
+
+    seen = {(r["content_type"], r["content_id"]) for r in results}
+    extras = []
+    for hit in _keyword_search(db, organization_id, query, content_type, k):
+        key = (hit["content_type"], hit["content_id"])
+        if hit["score"] >= 0.5 and key not in seen:
+            extras.append(hit)
+            seen.add(key)
+        if len(extras) == reserved:
+            break
+    if not extras:
+        return results
+    return results[: k - len(extras)] + extras
+
+
+def _vector_search(db: Session, organization_id: int, query: str, content_type: str | None = None, k: int = 5) -> list[dict]:
     """Semantic search over stored embeddings. Postgres uses pgvector's
     indexed cosine_distance() operator; SQLite (dev only) falls back to a
     brute-force cosine similarity scan in Python - fine for the row counts

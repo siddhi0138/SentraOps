@@ -177,16 +177,19 @@ def _format_evidence(evidence: list[dict]) -> str:
 
 
 def answer_question(question: str, evidence: list[dict]) -> str:
-    response = _call_groq(
-        "chat",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Evidence:\n{_format_evidence(evidence)}\n\nQuestion: {question}"},
-        ],
-        temperature=0.2,
-        max_tokens=800,
-    )
-    return response.choices[0].message.content
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Evidence:\n{_format_evidence(evidence)}\n\nQuestion: {question}"},
+    ]
+    # A reasoning model can spend its whole token budget thinking and return an empty
+    # answer. Retry once with a much larger budget before giving up, and never hand the
+    # page an empty string as if it were an answer.
+    for max_tokens in (800, 3000):
+        response = _call_groq("chat", messages=messages, temperature=0.2, max_tokens=max_tokens)
+        answer = (response.choices[0].message.content or "").strip()
+        if answer:
+            return answer
+    raise ChatProviderError("The AI model returned an empty answer - please try again or rephrase the question.")
 
 
 _EXPLAIN_TONE_BY_AUDIENCE = {

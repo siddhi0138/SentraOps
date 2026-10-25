@@ -159,3 +159,24 @@ def test_provider_error_when_every_model_is_missing(monkeypatch):
         MockGroq.return_value.chat.completions.create.side_effect = _not_found()
         with pytest.raises(ai_module.ChatProviderError):
             ai_module.chat_json("sys", "user")
+
+
+# --- chat never returns an empty answer ------------------------------------------
+
+def test_answer_question_retries_with_a_bigger_budget_when_the_first_answer_is_empty(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    with patch("app.ai.Groq") as MockGroq:
+        create = MockGroq.return_value.chat.completions.create
+        create.side_effect = [_ok_response(None), _ok_response("The answer.")]
+        assert ai_module.answer_question("what happened?", []) == "The answer."
+    assert create.call_count == 2
+    assert create.call_args_list[1].kwargs["max_tokens"] >= 3000
+
+
+def test_answer_question_raises_a_readable_error_instead_of_returning_nothing(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    with patch("app.ai.Groq") as MockGroq:
+        MockGroq.return_value.chat.completions.create.return_value = _ok_response("   ")
+        with pytest.raises(ai_module.ChatProviderError) as error:
+            ai_module.answer_question("what happened?", [])
+    assert "empty answer" in str(error.value)
