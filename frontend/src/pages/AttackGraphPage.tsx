@@ -5,7 +5,6 @@ import { useAuth } from '../auth/AuthContext'
 import { canAct as roleCanAct } from '../auth/roles'
 import { AttackGraphView } from '../components/AttackGraphView'
 import type { GraphData, GraphNode } from '../api/types'
-import { usePersistentState } from '../hooks/usePersistentState'
 
 type EntityType = 'host' | 'user' | 'ip'
 
@@ -18,7 +17,7 @@ export function AttackGraphPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
-  const [syncMessage, setSyncMessage] = usePersistentState<string>('attack-graph-sync-message')
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
 
   const [entityType, setEntityType] = useState<EntityType>('host')
   const [entityValue, setEntityValue] = useState('')

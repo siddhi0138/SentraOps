@@ -1,7 +1,7 @@
 from contextlib import ExitStack
 from unittest.mock import patch
 
-from neo4j.exceptions import ConfigurationError, ServiceUnavailable
+from neo4j.exceptions import ServiceUnavailable
 
 from app.agents.graph_context import build_graph_context
 from app.agents.state import format_graph_context
@@ -18,16 +18,6 @@ def test_build_graph_context_unavailable_when_neo4j_down():
     with patch("app.agents.graph_context.get_entity_blast_radius", side_effect=ServiceUnavailable("down")):
         context = build_graph_context(incident)
     assert context == {"available": False, "connected_hosts": [], "connected_incident_count": 0}
-
-
-def test_build_graph_context_unavailable_when_neo4j_instance_deleted():
-    # A deleted Aura instance raises ValueError (unresolvable host); a blank or
-    # malformed NEO4J_URI raises ConfigurationError. Neither is a Neo4jError.
-    incident = _fake_incident(["finance-pc-21"])
-    for error in (ValueError("Cannot resolve address x.databases.neo4j.io:7687"), ConfigurationError("URI scheme '' is not supported")):
-        with patch("app.agents.graph_context.get_entity_blast_radius", side_effect=error):
-            context = build_graph_context(incident)
-        assert context == {"available": False, "connected_hosts": [], "connected_incident_count": 0}
 
 
 def test_build_graph_context_no_affected_hosts_never_calls_neo4j():
@@ -53,7 +43,7 @@ def test_build_graph_context_aggregates_real_blast_radius_excluding_own_hosts():
     with patch("app.agents.graph_context.get_entity_blast_radius", return_value=fake_subgraph) as mock_blast_radius:
         context = build_graph_context(incident)
 
-    mock_blast_radius.assert_called_once_with("host", "finance-pc-21", 1, hops=2, db=None)
+    mock_blast_radius.assert_called_once_with("host", "finance-pc-21", 1, hops=2)
     assert context == {"available": True, "connected_hosts": ["db-server-03"], "connected_incident_count": 1}
 
 
@@ -105,33 +95,3 @@ def test_investigation_passes_real_graph_context_to_investigation_and_risk_agent
     assert "3 other incident" in captured["investigation"]
     assert "quarantine-host-99" in captured["risk"]
     assert "3 other incident" in captured["risk"]
-
-
-def test_health_neo4j_ok_and_503(client):
-    from unittest.mock import MagicMock
-
-    driver = MagicMock()
-    with patch("app.graph.get_driver", return_value=driver):
-        assert client.get("/health/neo4j").json() == {"status": "ok"}
-        driver.session.return_value.__enter__.return_value.run.assert_called_once_with("RETURN 1")
-
-    with patch("app.graph.get_driver", side_effect=ValueError("Cannot resolve address")):
-        response = client.get("/health/neo4j")
-    assert response.status_code == 503
-    assert "Neo4j unavailable" in response.json()["detail"]
-
-
-def test_health_redis_ok_and_503(client):
-    import redis
-    from unittest.mock import MagicMock
-
-    fake = MagicMock()
-    with patch("app.main.get_redis_client", return_value=fake):
-        assert client.get("/health/redis").json() == {"status": "ok"}
-    assert fake.set.call_args.args[0] == "keepalive"
-    fake.ping.assert_called_once()
-
-    with patch("app.main.get_redis_client", side_effect=redis.ConnectionError("down")):
-        response = client.get("/health/redis")
-    assert response.status_code == 503
-    assert "Redis unavailable" in response.json()["detail"]

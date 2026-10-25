@@ -3,7 +3,6 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { canAct as roleCanAct } from '../auth/roles'
 import type { KnowledgeDocument } from '../api/types'
-import { usePersistentState } from '../hooks/usePersistentState'
 
 export function KnowledgeBasePage() {
   const { user } = useAuth()
@@ -14,7 +13,7 @@ export function KnowledgeBasePage() {
   const [uploading, setUploading] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [title, setTitle] = useState('')
-  const [message, setMessage] = usePersistentState<string>('knowledge-base-message')
+  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 

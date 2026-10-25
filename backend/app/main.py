@@ -1,20 +1,15 @@
-import asyncio
 import csv
 import io
 import json
-import logging
 import os
 import re
 import secrets
-import time
-import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Literal
 from urllib.parse import parse_qs
 
 import httpx
-import redis
 import redis.asyncio as aioredis
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +17,8 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from prometheus_fastapi_instrumentator import Instrumentator
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -69,7 +66,7 @@ from app.agents.runner import gather_investigation_inputs, mark_run_failed, pers
 from app.agents.memory import build_memory_context
 from app.ai import ChatConfigError, ChatProviderError, answer_question, explain_event, explain_incident, translate_query
 from app.confidence import compute_dual_evidence_confidence
-from app.graph import get_entity_blast_radius, get_full_graph, get_incident_subgraph, neo4j_session, resync_graph
+from app.graph import get_entity_blast_radius, get_full_graph, get_incident_subgraph, resync_graph
 from app.slack_bot import (
     handle_investigate_button,
     handle_review_action_button,
@@ -94,9 +91,8 @@ from app.knowledge_base import delete_document as delete_knowledge_document
 from app.knowledge_base import ingest_document as ingest_knowledge_document
 from app.knowledge_base import seed_sample_documents
 from app.plugins import registry as plugin_registry
-from app.progress import REDIS_URL, channel_name, local_events_since
-from app.rag import search as rag_search, store_embeddings
-from app.reindex import backfill_missing_embeddings
+from app.progress import REDIS_URL, channel_name
+from app.rag import search as rag_search
 from app.rate_limit import limiter
 from app.simulate import get_scenario
 from app import bas
@@ -116,11 +112,7 @@ from app.marketplace import (
     uninstall_playbook,
 )
 from app.streaming import publish_raw_log, stream_status
-from app import scheduler
-from app.celery_app import celery_app
-from app.redis_client import get_client as get_redis_client, is_available as redis_is_available
-from app.workers import worker_available
-from app.tasks import consume_ingest_stream_task, investigate_incident_task, run_investigation_in_background
+from app.tasks import consume_ingest_stream_task, investigate_incident_task
 from app.threat_intel_hub import get_indicator_graph, resync_indicator_graph
 from app.threat_intel_hub import search as search_indicators
 from app.threat_intel_hub import sync_urlhaus
@@ -129,14 +121,8 @@ from app.threat_intel_hub import sync_urlhaus
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # Backup for Celery Beat's daily Slack summaries; only acts while Redis is down.
-    stop_scheduler = None if celery_app.conf.task_always_eager else scheduler.start()
     yield
-    if stop_scheduler is not None:
-        stop_scheduler.set()
 
-
-logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SentraOps", version="0.2.0", lifespan=lifespan)
 
@@ -145,20 +131,28 @@ app = FastAPI(title="SentraOps", version="0.2.0", lifespan=lifespan)
 # Groq-calling AI endpoints (cost/latency protection), not blanket-applied
 # to the whole API, since several frontend pages legitimately poll GET
 # endpoints every few seconds (AITeamPage, SOCCommandCenterPage).
-# No middleware/exception-handler registration needed here - each
-# @limiter.limit(...) decorator below raises its own HTTPException(429)
-# directly (app/rate_limit.py), unlike the old slowapi-based setup which
-# needed SlowAPIMiddleware + a RateLimitExceeded handler wired in globally.
+app.state.limiter = limiter
+
+
+def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    # slowapi's own default handler returns {"error": ...} - every other
+    # error response in this API uses FastAPI's {"detail": ...} shape
+    # (HTTPException), which the frontend's error parsing already expects.
+    response = JSONResponse({"detail": "Too many requests - please slow down and try again shortly."}, status_code=429)
+    return limiter._inject_headers(response, request.state.view_rate_limit)
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # The frontend is a separate origin (its own dev server / nginx container),
 # so browser requests to this API need CORS. Comma-separated allowlist, or
 # "*" (default) for local/demo use.
 _cors_origins = os.environ.get("CORS_ORIGINS", "*")
-_cors_origin_list = ["*"] if _cors_origins == "*" else [o.strip() for o in _cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origin_list,
-    allow_credentials=_cors_origins != "*",  # only allow credentials if not wildcard
+    allow_origins=["*"] if _cors_origins == "*" else [o.strip() for o in _cors_origins.split(",")],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -201,34 +195,6 @@ def _user_out(user: User) -> UserOut:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
-
-
-@app.get("/health/neo4j")
-def health_neo4j() -> dict:
-    """Runs a trivial Neo4j query. The keep-alive workflow calls this so the
-    free Aura instance counts as active (Aura Free pauses and eventually
-    deletes idle databases), and it returns 503 when Neo4j is unreachable so
-    a failing keep-alive run shows red in the Actions tab."""
-    try:
-        with neo4j_session() as session:
-            session.run("RETURN 1").consume()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Neo4j unavailable: {type(exc).__name__}")
-    return {"status": "ok"}
-
-
-@app.get("/health/redis")
-def health_redis() -> dict:
-    """Writes and reads one small key. The keep-alive workflow calls this so a
-    free hosted Redis (Upstash) counts as active, since idle databases get
-    archived and eventually deleted. Returns 503 when Redis is unreachable."""
-    try:
-        client = get_redis_client()
-        client.set("keepalive", datetime.now(timezone.utc).isoformat(), ex=7 * 24 * 3600)
-        client.ping()
-    except redis.RedisError as exc:
-        raise HTTPException(status_code=503, detail=f"Redis unavailable: {type(exc).__name__}")
     return {"status": "ok"}
 
 
@@ -589,7 +555,6 @@ def ingest_logs_streaming(
     request: Request,
     source_type: str,
     payload: IngestRequest,
-    db: Session = Depends(get_db),
     user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst)),
 ) -> dict:
     """Queues raw logs onto this org's Redis Stream and returns
@@ -600,16 +565,6 @@ def ingest_logs_streaming(
     producer shouldn't block on ingestion; POST /ingest/{source_type}
     and the connector /sync endpoint stay synchronous since their
     immediate ingested-count response is valuable for a "test now" UX."""
-    if not (worker_available()):
-        # No Redis means no stream and no worker to drain it. Ingest the logs
-        # directly instead of failing, so nothing a producer sends is lost.
-        logger.warning("Redis unavailable; ingesting streamed logs inline")
-        try:
-            events, _skipped = ingest(db, user.organization_id, source_type, payload.logs)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return {"queued": 0, "ingested": len(events), "mode": "inline"}
-
     for item in payload.logs:
         publish_raw_log(user.organization_id, source_type, item)
     consume_ingest_stream_task.delay(user.organization_id)
@@ -618,10 +573,7 @@ def ingest_logs_streaming(
 
 @app.get("/streaming/status")
 def get_streaming_status(user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive))) -> dict:
-    try:
-        return stream_status(user.organization_id)
-    except redis.RedisError:
-        return {"queued": 0, "pending": 0, "available": False}
+    return stream_status(user.organization_id)
 
 
 @app.post("/simulate/{scenario}")
@@ -648,35 +600,12 @@ def simulate(
         events, skipped = ingest(db, user.organization_id, "bas", bas_events)
         return {"scenario": scenario, "mode": "real", "sources": {"bas": {"ingested": len(events), "skipped": skipped}}}
     except Exception:
-        # Logged, not silent: expected on Render (no Kubernetes API), but a real
-        # BAS failure should be visible in the service logs.
-        logger.info("BAS campaign unavailable, falling back to synthetic scenario", exc_info=True)
+        pass  # no cluster access, or a live run failed - fall back below
 
     results = {}
-    pending_embeddings: list[tuple[str, int | None, str]] = []
-    try:
-        for source_type, raw_items in logs_by_source.items():
-            events, skipped = ingest(
-                db, user.organization_id, source_type, raw_items, pending_embeddings=pending_embeddings
-            )
-            results[source_type] = {"ingested": len(events), "skipped": skipped}
-        # One embedding request for all sources together, instead of one per source.
-        embedded = store_embeddings(db, user.organization_id, pending_embeddings)
-        db.commit()
-        if embedded:
-            # The embeddings service just answered, so use the moment to fill in
-            # any vectors an earlier outage skipped. Best-effort, never fails the request.
-            try:
-                backfill_missing_embeddings(db, user.organization_id)
-            except Exception:
-                logger.warning("Embedding backfill failed", exc_info=True)
-    except Exception:
-        logger.exception("Synthetic simulate scenario '%s' failed during ingest", scenario)
-        # Temporary debugging aid: SIMULATE_DEBUG=1 on the service returns the
-        # traceback in the 500 body. Off by default; remove once the bug is fixed.
-        if os.environ.get("SIMULATE_DEBUG") == "1":
-            raise HTTPException(status_code=500, detail=traceback.format_exc())
-        raise
+    for source_type, raw_items in logs_by_source.items():
+        events, skipped = ingest(db, user.organization_id, source_type, raw_items)
+        results[source_type] = {"ingested": len(events), "skipped": skipped}
 
     return {"scenario": scenario, "mode": "synthetic", "sources": results}
 
@@ -705,33 +634,26 @@ def run_bas_campaign(
 ) -> dict:
     """Executes real MITRE ATT&CK techniques (app/bas.py) inside a real,
     sandboxed Kubernetes pod - genuine attacker behavior against a real
-    (if disposable) target. The resulting real command output is ingested
-    through the same pipeline as every other log source, so it flows into real
-    correlation/AI investigation like anything else.
-
-    With no cluster to run them in (or if the cluster run fails), falls back to
-    labeled sample output instead of failing: events are tagged
-    "[BAS-SIMULATED]" and the response says mode="simulated" with the reason, so
-    a simulated run is never mistaken for a real execution."""
+    (if disposable) target, not synthetic canned data like /simulate. The
+    resulting real command output is ingested through the same pipeline
+    as every other log source, so it flows into real correlation/AI
+    investigation like anything else."""
     unknown = [tid for tid in payload.technique_ids if tid not in bas.TECHNIQUES]
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown technique id(s): {unknown}")
 
-    mode = "real"
-    fallback_reason = None
     try:
         raw_items = bas.run_campaign(user.organization_id, payload.technique_ids)
+    except bas.BasNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        logger.info("Real BAS run unavailable (%s); using a labeled simulated run", exc, exc_info=True)
-        raw_items = bas.simulate_campaign(payload.technique_ids)
-        mode = "simulated"
-        fallback_reason = str(exc)
+        # A real cluster is a real system boundary (pod scheduling failure,
+        # image pull error, RBAC misconfiguration, ...) - surface it as a
+        # diagnosable 502, not a bare unhandled 500 an analyst can't act on.
+        raise HTTPException(status_code=502, detail=f"BAS run failed: {exc}")
 
     events, skipped = ingest(db, user.organization_id, "bas", raw_items)
-    result = {"ran": len(payload.technique_ids), "ingested": len(events), "skipped": skipped, "mode": mode}
-    if fallback_reason:
-        result["fallback_reason"] = fallback_reason
-    return result
+    return {"ran": len(payload.technique_ids), "ingested": len(events), "skipped": skipped}
 
 
 @app.delete("/bas/target")
@@ -1162,36 +1084,9 @@ def investigate_incident_live(
     db.commit()
     db.refresh(run)
 
-    if worker_available():
-        investigate_incident_task.delay(run.id, incident_id)
-        return {"run_id": run.id, "incident_id": incident_id, "status": run.status}
+    investigate_incident_task.delay(run.id, incident_id)
 
-    # Redis (the Celery broker and the progress channel) is unreachable, so there
-    # is no worker to hand this to. Run the same job in a background thread of
-    # this process: this call still returns right away, and progress streams over
-    # the WebSocket from the in-process events (app/progress.py).
-    logger.warning("Redis unavailable; running investigation in a background thread")
-    run_investigation_in_background(run.id, incident_id)
     return {"run_id": run.id, "incident_id": incident_id, "status": run.status}
-
-
-async def _stream_local_progress(websocket: WebSocket, run_id: int) -> None:
-    """Live progress without Redis: the run's events are kept in this process
-    (app/progress.py), so poll them and forward each one until the run finishes."""
-    sent = 0
-    deadline = time.monotonic() + 300
-    try:
-        while time.monotonic() < deadline:
-            for event in local_events_since(run_id, sent):
-                sent += 1
-                await websocket.send_json(event)
-                if event.get("type") in ("completed", "failed"):
-                    await websocket.close()
-                    return
-            await asyncio.sleep(0.25)
-        await websocket.close()
-    except (WebSocketDisconnect, RuntimeError):
-        pass
 
 
 @app.websocket("/ws/agent-runs/{run_id}")
@@ -1237,22 +1132,10 @@ async def agent_run_progress_ws(websocket: WebSocket, run_id: int, db: Session =
         await websocket.close()
         return
 
-    if not redis_is_available():
-        await _stream_local_progress(websocket, run_id)
-        return
-
     redis_client = aioredis.from_url(REDIS_URL)
     pubsub = redis_client.pubsub()
     channel = channel_name(run_id)
-    try:
-        await pubsub.subscribe(channel)
-    except redis.RedisError:
-        # No Redis, so no live progress. The run itself is unaffected; the
-        # client falls back to loading the finished run.
-        await websocket.send_json({"type": "error", "error": "Live progress is unavailable right now"})
-        await redis_client.aclose()
-        await websocket.close()
-        return
+    await pubsub.subscribe(channel)
     try:
         async for message in pubsub.listen():
             if message["type"] != "message":
@@ -1899,11 +1782,10 @@ def sync_threat_intel_graph(
 @app.get("/threat-intel/graph")
 def threat_intel_graph(
     limit: int = Query(default=300, ge=1, le=1000),
-    db: Session = Depends(get_db),
     user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     try:
-        return get_indicator_graph(user.organization_id, limit, db=db)
+        return get_indicator_graph(user.organization_id, limit)
     except (Neo4jError, ServiceUnavailable):
         raise _graph_unavailable()
 
@@ -1940,7 +1822,7 @@ def incident_graph(
     between them - the "Attack Graph" tab on an incident."""
     incident = _get_scoped_or_404(db, Incident, incident_id, user.organization_id, "Incident not found")
     try:
-        return get_incident_subgraph(incident.id, user.organization_id, db=db)
+        return get_incident_subgraph(incident.id, user.organization_id)
     except (Neo4jError, ServiceUnavailable):
         raise _graph_unavailable()
 
@@ -1950,7 +1832,6 @@ def entity_blast_radius(
     type: Literal["host", "user", "ip"],
     value: str,
     hops: int = Query(default=2, ge=1, le=4),
-    db: Session = Depends(get_db),
     user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """Everything reachable from one host/user/IP within N hops, across
@@ -1958,7 +1839,7 @@ def entity_blast_radius(
     own view never shows (e.g. the same source IP hitting a different
     host in an unrelated incident three weeks later)."""
     try:
-        return get_entity_blast_radius(type, value, user.organization_id, hops, db=db)
+        return get_entity_blast_radius(type, value, user.organization_id, hops)
     except (Neo4jError, ServiceUnavailable):
         raise _graph_unavailable()
 
@@ -2010,12 +1891,11 @@ def digital_twin_narrative(
 @app.get("/graph")
 def full_graph(
     limit: int = Query(default=300, ge=1, le=1000),
-    db: Session = Depends(get_db),
     user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager, Role.analyst, Role.auditor, Role.executive)),
 ) -> dict:
     """A capped view of the whole attack graph - the general explorer."""
     try:
-        return get_full_graph(user.organization_id, limit, db=db)
+        return get_full_graph(user.organization_id, limit)
     except (Neo4jError, ServiceUnavailable):
         raise _graph_unavailable()
 
@@ -2423,17 +2303,6 @@ def search(
         "incidents": [i.to_summary_dict() for i in incidents],
         "assets": [a.to_dict() for a in assets],
     }
-
-
-@app.post("/rag/reindex")
-def reindex_embeddings(
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles(Role.owner, Role.admin, Role.soc_manager)),
-) -> dict:
-    """Adds search vectors for events and incidents saved while the embeddings
-    service was unavailable. Returns how many were embedded (0 if there is
-    nothing missing, or the service is still down)."""
-    return {"embedded": backfill_missing_embeddings(db, user.organization_id, limit=200)}
 
 
 @app.get("/rag/search")

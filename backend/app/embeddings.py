@@ -1,8 +1,5 @@
 import os
-import time
 from functools import lru_cache
-
-import httpx
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 
@@ -25,45 +22,6 @@ def _embed_local(text: str) -> list[float]:
     return model.encode(text, normalize_embeddings=True).tolist()
 
 
-def _embed_local_batch(texts: list[str]) -> list[list[float]]:
-    model = _get_model()
-    return model.encode(texts, normalize_embeddings=True).tolist()
-
-
-def _post_to_service(path: str, payload: dict) -> dict:
-    """POST to the standalone embeddings service, retrying transient failures.
-
-    On Render's free tier the embeddings service sleeps after 15min idle, same
-    as this one - confirmed by testing that a 30s timeout isn't enough for its
-    cold-start wake (~30-60s), which was turning into a 500 here instead of
-    just a slow-but-successful request. Retries also cover 429/5xx responses
-    when the service is busy. The 429s come from in front of the service (its
-    own logs show only 200s), so they clear on their own after a while; waits
-    total about a minute (2s, 4s, 8s, 16s, 30s), or the server's Retry-After
-    header if it sends one, before the error is raised."""
-    service_url = os.environ["EMBEDDINGS_SERVICE_URL"]
-    waits = (2, 4, 8, 16, 30)
-    last_error: Exception | None = None
-    for attempt in range(len(waits) + 1):
-        try:
-            response = httpx.post(f"{service_url}{path}", json=payload, timeout=90)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as exc:
-            last_error = exc
-            retryable = exc.response.status_code == 429 or exc.response.status_code >= 500
-            if not retryable:
-                raise
-            retry_after = exc.response.headers.get("Retry-After", "")
-            delay = float(retry_after) if retry_after.replace(".", "", 1).isdigit() else waits[min(attempt, len(waits) - 1)]
-        except httpx.HTTPError as exc:
-            last_error = exc
-            delay = waits[min(attempt, len(waits) - 1)]
-        if attempt < len(waits):
-            time.sleep(delay)
-    raise last_error
-
-
 def embed_text(text: str) -> list[float]:
     """Free, local, no API key by default - runs entirely on this process's
     own CPU. If EMBEDDINGS_SERVICE_URL is set, delegates to the standalone
@@ -75,25 +33,24 @@ def embed_text(text: str) -> list[float]:
     driver, the Kubernetes client, and everything else main.py imports -
     together they don't fit. Splitting the model out to its own process,
     which holds nothing else, fits within the same limit that OOMs it here."""
-    if os.environ.get("EMBEDDINGS_SERVICE_URL"):
-        return _post_to_service("/embed", {"text": text})["vector"]
+    service_url = os.environ.get("EMBEDDINGS_SERVICE_URL")
+    if service_url:
+        import httpx
+
+        # On Render's free tier the embeddings service sleeps after 15min
+        # idle, same as this one - confirmed by testing that a 30s timeout
+        # isn't enough for its cold-start wake (~30-60s), which was turning
+        # into a 500 here instead of just a slow-but-successful request.
+        # One retry: the request that wakes it up can itself still time out
+        # right at the boundary, but the service is warm by the time we
+        # send the second one.
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = httpx.post(f"{service_url}/embed", json={"text": text}, timeout=90)
+                response.raise_for_status()
+                return response.json()["vector"]
+            except httpx.HTTPError as exc:
+                last_error = exc
+        raise last_error
     return _embed_local(text)
-
-
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embeds many texts in one call. Over the service this is one HTTP request
-    for the whole list, instead of one request per text, so a burst of events
-    doesn't trip the service's rate limit. Returns vectors in the same order."""
-    if not texts:
-        return []
-    if os.environ.get("EMBEDDINGS_SERVICE_URL"):
-        try:
-            return _post_to_service("/embed_batch", {"texts": texts})["vectors"]
-        except httpx.HTTPStatusError as exc:
-            # 404 means the embeddings service hasn't been redeployed with
-            # /embed_batch yet (backend and service deploy separately). Fall
-            # back to one request per text against the endpoint that always exists.
-            if exc.response.status_code != 404:
-                raise
-            return [_post_to_service("/embed", {"text": text})["vector"] for text in texts]
-    return _embed_local_batch(texts)

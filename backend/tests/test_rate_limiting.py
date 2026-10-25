@@ -1,5 +1,3 @@
-from unittest.mock import patch
-
 import redis
 import pytest
 from starlette.requests import Request
@@ -107,15 +105,3 @@ def test_create_organization_endpoint_returns_429_after_exceeding_the_real_limit
     statuses = [r.status_code for r in responses]
     assert statuses[:5] == [200] * 5
     assert statuses[5] == 429
-
-
-def test_rate_limits_still_apply_from_memory_when_redis_is_down(client, rate_limiting_enabled):
-    import app.rate_limit as rl
-
-    rl._redis_retry_at = 0.0
-    with patch.object(rl, "_get_strategy", side_effect=redis.ConnectionError("down")):
-        statuses = [client.post("/auth/login", json={"email": "nobody@example.com", "password": "wrong"}).status_code for _ in range(11)]
-    rl._redis_retry_at = 0.0
-
-    assert statuses[:10] == [401] * 10
-    assert statuses[10] == 429

@@ -2,25 +2,16 @@ import json
 import os
 import time
 
-from groq import Groq, GroqError, NotFoundError
+from groq import Groq, GroqError
 
 from app.metrics import ai_call_duration_seconds, ai_calls_total, ai_cost_usd_total, ai_tokens_total
 
-# Groq retired llama-3.3-70b-versatile on 2026-08-16 (free/developer tiers) and
-# points to openai/gpt-oss-120b as its replacement - see
-# https://console.groq.com/docs/deprecations. Models get retired on a schedule, so
-# if the configured one is reported as not found, the next one in
-# GROQ_MODEL_FALLBACKS (comma separated) is tried, and the first one that works is
-# remembered for later calls.
-DEFAULT_MODEL = "openai/gpt-oss-120b"
-DEFAULT_FALLBACK_MODELS = "openai/gpt-oss-120b,openai/gpt-oss-20b"
-
-_working_model: str | None = None
+DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 # Real published Groq per-token pricing (USD per token, converted from their
 # per-million-token rates as of 2026-07: $0.59/1M input, $0.79/1M output for
-# llama-3.3-70b-versatile). Used for every GROQ_MODEL value, including
-# openai/gpt-oss-120b, so the cost shown is an estimate, since Groq doesn't expose a pricing-lookup API - close
+# llama-3.3-70b-versatile). Falls back to this same rate for any other
+# GROQ_MODEL value, since Groq doesn't expose a pricing-lookup API - close
 # enough to be a genuinely useful cost estimate, not exact for every model.
 _PROMPT_PRICE_PER_TOKEN = 0.59 / 1_000_000
 _COMPLETION_PRICE_PER_TOKEN = 0.79 / 1_000_000
@@ -56,46 +47,6 @@ def _get_client() -> Groq:
     return Groq(api_key=api_key)
 
 
-def _models_to_try() -> list[str]:
-    configured = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
-    fallbacks = os.environ.get("GROQ_MODEL_FALLBACKS", DEFAULT_FALLBACK_MODELS).split(",")
-    ordered = ([_working_model] if _working_model else []) + [configured] + fallbacks
-    models: list[str] = []
-    for name in (m.strip() for m in ordered):
-        if name and name not in models:
-            models.append(name)
-    return models
-
-
-def _create_with_model_fallback(client, *, messages: list[dict], temperature: float, max_tokens: int, json_mode: bool):
-    """One chat completion, moving to the next model only when Groq says a model
-    doesn't exist or isn't available (404, e.g. a retired model). Every other error
-    is raised as is - a rate limit or a bad key won't be fixed by another model."""
-    global _working_model
-    last_error: GroqError | None = None
-    for model in _models_to_try():
-        options: dict = {"response_format": {"type": "json_object"}} if json_mode else {}
-        if model.startswith("openai/gpt-oss"):
-            # Reasoning models spend tokens thinking before they answer, and those
-            # count against the limit: keep the reasoning short and leave room, so
-            # the small limits the agents use don't cut the answer off.
-            options["reasoning_effort"] = "low"
-            options["include_reasoning"] = False
-            max_tokens_for_model = max(max_tokens, 2000)
-        else:
-            max_tokens_for_model = max_tokens
-        try:
-            response = client.chat.completions.create(
-                model=model, messages=messages, temperature=temperature, max_tokens=max_tokens_for_model, **options
-            )
-        except NotFoundError as exc:
-            last_error = exc
-            continue
-        _working_model = model
-        return response
-    raise last_error  # every model was reported missing
-
-
 def _call_groq(feature: str, *, messages: list[dict], temperature: float, max_tokens: int, json_mode: bool = False):
     """The one place every Groq call in this app actually goes through -
     every agent (via chat_json) and every AI feature (chat, incident/event
@@ -105,11 +56,16 @@ def _call_groq(feature: str, *, messages: list[dict], temperature: float, max_to
     it. `feature` is a short label (e.g. "agent_detection",
     "incident_explain") used purely for metric cardinality, not logic."""
     client = _get_client()
+    model = os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
     start = time.monotonic()
 
     try:
-        response = _create_with_model_fallback(
-            client, messages=messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **({"response_format": {"type": "json_object"}} if json_mode else {}),
         )
     except GroqError as exc:
         ai_calls_total.labels(feature=feature, status="error").inc()

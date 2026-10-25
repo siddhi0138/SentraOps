@@ -19,7 +19,7 @@ backend:
   replicas: 1
   nodePort: 30080
   corsOrigins: "*"
-  groqModel: openai/gpt-oss-120b
+  groqModel: llama-3.3-70b-versatile
   # Where a user's real browser lands after installing the Slack app (see
   # app/slack_oauth.py) and where Slack messages link back to - must be
   # reachable by a human's browser, not internal cluster DNS.

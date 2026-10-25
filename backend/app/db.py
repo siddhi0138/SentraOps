@@ -15,19 +15,7 @@ load_dotenv()
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./sentraops.db")
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-
-
-def engine_options(url: str) -> dict:
-    """Hosted Postgres (Neon and similar free tiers) pauses idle databases and drops
-    their connections, so a pooled connection can be dead by the next request. Test
-    each connection before using it and retire old ones, so the first request after a
-    pause reconnects instead of failing."""
-    if url.startswith("sqlite"):
-        return {}
-    return {"pool_pre_ping": True, "pool_recycle": 240}
-
-
-engine = create_engine(DATABASE_URL, connect_args=connect_args, **engine_options(DATABASE_URL))
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

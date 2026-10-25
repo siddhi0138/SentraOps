@@ -1,18 +1,13 @@
 import ipaddress
-import logging
 from datetime import datetime, timezone
 
-from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db_models import Incident, ThreatIndicator
-from app import pg_graph
-from app.graph import _neo4j_then_postgres, _process_graph_result, neo4j_session
+from app.graph import _process_graph_result, get_driver
 from app.plugins.connectors.urlhaus import fetch_records
-
-logger = logging.getLogger(__name__)
 
 
 def indicator_type_of(value: str) -> str:
@@ -232,6 +227,7 @@ def resync_indicator_graph(db: Session, driver=None) -> dict:
     re-scoped by organization_id (see get_indicator_graph), so nothing
     cross-tenant is actually exposed even though the shared nodes carry
     every org's matches in storage."""
+    driver = driver or get_driver()
 
     indicators = db.query(ThreatIndicator).all()
     indicator_rows = []
@@ -264,28 +260,22 @@ def resync_indicator_graph(db: Session, driver=None) -> dict:
             if indicator_value:
                 match_rows.append({"value": indicator_value, "incident_id": incident.id})
 
-    counts = {"indicators": len(indicator_rows), "tag_links": len(tag_edges), "incident_matches": len(match_rows)}
-    try:
-        with neo4j_session(driver) as session:
-            _ensure_indicator_graph_constraints(session)
-            session.execute_write(_rebuild_indicator_graph_tx, indicator_rows, tag_edges, match_rows)
-    except (Neo4jError, ServiceUnavailable):
-        # Nothing to rebuild: with Neo4j unreachable the indicator graph is
-        # answered straight from Postgres (see pg_graph.indicator_graph).
-        logger.warning("Neo4j unavailable; the indicator graph is being served from Postgres", exc_info=True)
-        return {**counts, "backend": "postgres"}
+    with driver.session() as session:
+        _ensure_indicator_graph_constraints(session)
+        session.execute_write(_rebuild_indicator_graph_tx, indicator_rows, tag_edges, match_rows)
 
-    return counts
+    return {"indicators": len(indicator_rows), "tag_links": len(tag_edges), "incident_matches": len(match_rows)}
 
 
-def _neo4j_indicator_graph(organization_id: int, limit: int = 300, driver=None) -> dict:
+def get_indicator_graph(organization_id: int, limit: int = 300, driver=None) -> dict:
     """The shared threat-intel relationship graph: which indicators share
     tags/sources with each other, plus which have actually matched in
     *this* organization's own incidents. MATCHED_IN is re-scoped by
     organization_id right here in the query, even though Indicator/Tag/
     Source nodes themselves are shared platform data - see
     resync_indicator_graph's docstring for why that split is safe."""
-    with neo4j_session(driver) as session:
+    driver = driver or get_driver()
+    with driver.session() as session:
         result = session.run(
             """
             MATCH (a:Indicator)-[r:TAGGED_AS|REPORTED_BY]->(b)
@@ -299,11 +289,3 @@ def _neo4j_indicator_graph(organization_id: int, limit: int = 300, driver=None) 
             limit=limit,
         )
         return _process_graph_result(result)
-
-
-def get_indicator_graph(organization_id: int, limit: int = 300, driver=None, db: Session | None = None) -> dict:
-    return _neo4j_then_postgres(
-        lambda: _neo4j_indicator_graph(organization_id, limit, driver),
-        lambda: pg_graph.indicator_graph(db, organization_id, limit),
-        db,
-    )

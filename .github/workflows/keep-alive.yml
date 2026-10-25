@@ -19,25 +19,3 @@ jobs:
           curl --fail --silent --show-error --max-time 90 \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
             https://sentraops-backend-tvow.onrender.com/health
-
-      # Both checks below go through the backend, which this job is already
-      # keeping awake, so they cost no extra Render instance hours. They run a
-      # real query / write so the free Aura (Neo4j) and Upstash (Redis) databases
-      # count as active - idle free databases get paused, then deleted. The app
-      # keeps working without either (graph from Postgres, in-memory fallbacks),
-      # so a failure is shown as a warning, not a red run.
-      - name: Keep Neo4j active
-        if: always()
-        run: |
-          curl --fail --silent --show-error --max-time 90 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
-            https://sentraops-backend-tvow.onrender.com/health/neo4j \
-            || echo "::warning::Neo4j is unreachable - the app is serving the graph from Postgres"
-
-      - name: Keep Redis active
-        if: always()
-        run: |
-          curl --fail --silent --show-error --max-time 90 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
-            https://sentraops-backend-tvow.onrender.com/health/redis \
-            || echo "::warning::Redis is unreachable - the app is using its in-memory fallbacks"

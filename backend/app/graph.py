@@ -1,15 +1,9 @@
-import logging
 import os
-from contextlib import contextmanager
 
 from neo4j import GraphDatabase
-from neo4j.exceptions import DriverError, Neo4jError, ServiceUnavailable
 from sqlalchemy.orm import Session
 
-from app import pg_graph
 from app.db_models import Event, Incident
-
-logger = logging.getLogger(__name__)
 
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
@@ -30,29 +24,6 @@ def get_driver():
     if _driver is None:
         _driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
     return _driver
-
-
-@contextmanager
-def neo4j_session(driver=None):
-    """Opens a Neo4j session and reports every "can't reach the database"
-    failure as ServiceUnavailable, the one type callers already handle.
-
-    A deleted Aura instance raises ValueError ("Cannot resolve address"), a
-    blank or malformed NEO4J_URI raises ConfigurationError, and a dropped
-    connection can raise OSError - none of which the endpoints caught, so each
-    surfaced as a 500 instead of the clean "graph unavailable" response."""
-    try:
-        driver = driver or get_driver()
-        with driver.session() as session:
-            yield session
-    except (Neo4jError, ServiceUnavailable):
-        raise
-    except (DriverError, OSError) as exc:
-        raise ServiceUnavailable(f"Neo4j unavailable: {type(exc).__name__}") from exc
-    except ValueError as exc:
-        if "resolve" in str(exc).lower():
-            raise ServiceUnavailable(f"Neo4j unavailable: {exc}") from exc
-        raise
 
 
 def reset_driver() -> None:
@@ -191,6 +162,7 @@ def resync_graph(db: Session, organization_id: int, driver=None) -> dict:
     couple the hot ingestion path to a second database - fine at this
     project's data volume; a real high-throughput deployment would stream
     changes instead."""
+    driver = driver or get_driver()
 
     incidents = db.query(Incident).filter(Incident.organization_id == organization_id).all()
     events = (
@@ -213,27 +185,22 @@ def resync_graph(db: Session, organization_id: int, driver=None) -> dict:
         for e in events
     ]
 
-    try:
-        with neo4j_session(driver) as session:
-            _ensure_constraints(session)
-            session.execute_write(_rebuild_graph_tx, organization_id, incident_rows, event_rows)
-    except (Neo4jError, ServiceUnavailable):
-        # Nothing to rebuild: with Neo4j unreachable, graph queries are answered
-        # straight from Postgres (see pg_graph), which is always current.
-        logger.warning("Neo4j unavailable; the graph is being served from Postgres", exc_info=True)
-        return {**pg_graph.counts(db, organization_id), "backend": "postgres"}
+    with driver.session() as session:
+        _ensure_constraints(session)
+        session.execute_write(_rebuild_graph_tx, organization_id, incident_rows, event_rows)
 
     return {"incidents": len(incident_rows), "events_processed": len(event_rows)}
 
 
-def _neo4j_incident_subgraph(incident_id: int, organization_id: int, driver=None) -> dict:
+def get_incident_subgraph(incident_id: int, organization_id: int, driver=None) -> dict:
     """Every Host/User/IP tied to one incident, plus the edges between
     them - what the "Attack Graph" tab on an incident renders. The
     Postgres-side org check already happened before this is called (see
     main.py's _get_scoped_or_404), but the Cypher itself is *also* scoped -
     defense in depth, not redundant, since this function has no other way
     to know the caller was already authorized for this incident."""
-    with neo4j_session(driver) as session:
+    driver = driver or get_driver()
+    with driver.session() as session:
         result = session.run(
             """
             MATCH (n {organization_id: $org_id})-[:PART_OF]->(c:Incident {id: $id, organization_id: $org_id})
@@ -248,7 +215,7 @@ def _neo4j_incident_subgraph(incident_id: int, organization_id: int, driver=None
         return _process_graph_result(result)
 
 
-def _neo4j_entity_blast_radius(entity_type: str, value: str, organization_id: int, hops: int = 2, driver=None) -> dict:
+def get_entity_blast_radius(entity_type: str, value: str, organization_id: int, hops: int = 2, driver=None) -> dict:
     """Everything reachable from one host/user/IP within N hops, across
     every incident it appears in - the actual "attack graph" query: does
     this host/user/IP connect to other incidents through a shared entity,
@@ -264,7 +231,8 @@ def _neo4j_entity_blast_radius(entity_type: str, value: str, organization_id: in
     lookup_value = value.lower() if entity_type != "ip" else value
     start_org_key = _org_key(organization_id, lookup_value)
 
-    with neo4j_session(driver) as session:
+    driver = driver or get_driver()
+    with driver.session() as session:
         result = session.run(
             f"""
             MATCH (start:{label} {{org_key: $org_key}})
@@ -281,50 +249,13 @@ def _neo4j_entity_blast_radius(entity_type: str, value: str, organization_id: in
         return _process_graph_result(result)
 
 
-def _neo4j_full_graph(organization_id: int, limit: int = 300, driver=None) -> dict:
+def get_full_graph(organization_id: int, limit: int = 300, driver=None) -> dict:
     """A capped view of the whole attack graph - the general explorer."""
-    with neo4j_session(driver) as session:
+    driver = driver or get_driver()
+    with driver.session() as session:
         result = session.run(
             "MATCH (a {organization_id: $org_id})-[r]->(b) RETURN a, r, b LIMIT $limit",
             org_id=organization_id,
             limit=limit,
         )
         return _process_graph_result(result)
-
-
-def _neo4j_then_postgres(neo4j_call, postgres_call, db):
-    """Neo4j is the primary graph store. If it can't be reached and the caller
-    passed a database session, answer from Postgres instead (same result shape)."""
-    try:
-        return neo4j_call()
-    except (Neo4jError, ServiceUnavailable):
-        if db is None:
-            raise
-        logger.warning("Neo4j unavailable; serving the graph from Postgres", exc_info=True)
-        return postgres_call()
-
-
-def get_incident_subgraph(incident_id: int, organization_id: int, driver=None, db: Session | None = None) -> dict:
-    return _neo4j_then_postgres(
-        lambda: _neo4j_incident_subgraph(incident_id, organization_id, driver),
-        lambda: pg_graph.incident_subgraph(db, incident_id, organization_id),
-        db,
-    )
-
-
-def get_entity_blast_radius(
-    entity_type: str, value: str, organization_id: int, hops: int = 2, driver=None, db: Session | None = None
-) -> dict:
-    return _neo4j_then_postgres(
-        lambda: _neo4j_entity_blast_radius(entity_type, value, organization_id, hops, driver),
-        lambda: pg_graph.entity_blast_radius(db, entity_type, value, organization_id, hops),
-        db,
-    )
-
-
-def get_full_graph(organization_id: int, limit: int = 300, driver=None, db: Session | None = None) -> dict:
-    return _neo4j_then_postgres(
-        lambda: _neo4j_full_graph(organization_id, limit, driver),
-        lambda: pg_graph.full_graph(db, organization_id, limit),
-        db,
-    )

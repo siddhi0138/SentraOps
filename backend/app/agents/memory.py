@@ -1,12 +1,8 @@
-import logging
-
 from sqlalchemy.orm import Session
 
 from app.db_models import AgentRun, Incident
 from app.learning import get_recent_corrections
 from app.rag import search as rag_search
-
-logger = logging.getLogger(__name__)
 
 
 def _repeat_entities(db: Session, incident: Incident, field: str, values: list[str]) -> list[dict]:
@@ -52,17 +48,9 @@ def build_memory_context(db: Session, incident: Incident) -> dict:
     completed AgentRuns) rather than a separate long-term-memory store -
     this platform's Postgres+pgvector already is that store."""
     query_text = f"{incident.title}\n{incident.report}".strip()
-    try:
-        similar_raw = (
-            rag_search(db, incident.organization_id, query_text, content_type="incident", k=6) if query_text else []
-        )
-    except Exception:
-        # The similar-incident lookup embeds the query text through the
-        # embeddings service. If that service is rate-limiting or down, the
-        # investigation should still run without this context, not fail with
-        # a 500. The traceback is logged so the failure stays visible.
-        logger.warning("Similar-incident lookup unavailable; investigating without it", exc_info=True)
-        similar_raw = []
+    similar_raw = (
+        rag_search(db, incident.organization_id, query_text, content_type="incident", k=6) if query_text else []
+    )
 
     similar_incidents = []
     for row in similar_raw:

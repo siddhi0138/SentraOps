@@ -4,7 +4,6 @@ import { useAuth } from '../auth/AuthContext'
 import { canAct as roleCanAct } from '../auth/roles'
 import { AttackGraphView } from '../components/AttackGraphView'
 import type { GraphData, ThreatIndicator, ThreatIndicatorType } from '../api/types'
-import { usePersistentState } from '../hooks/usePersistentState'
 
 const TYPE_OPTIONS: { value: ThreatIndicatorType | ''; label: string }[] = [
   { value: '', label: 'All types' },
@@ -23,7 +22,7 @@ export function ThreatIntelPage() {
   const [type, setType] = useState<ThreatIndicatorType | ''>('')
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
-  const [message, setMessage] = usePersistentState<string>('threat-intel-message')
+  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const [graph, setGraph] = useState<GraphData | null>(null)

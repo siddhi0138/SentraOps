@@ -188,27 +188,17 @@ def test_run_bas_campaign_rejects_unknown_technique(client, analyst_headers):
     assert response.status_code == 400
 
 
-def test_run_bas_campaign_falls_back_to_labeled_simulation_when_not_configured(client, analyst_headers):
+def test_run_bas_campaign_returns_503_when_not_configured(client, analyst_headers):
     with patch("app.main.bas.run_campaign", side_effect=bas.BasNotConfiguredError("no cluster access")):
-        response = client.post("/bas/run", json={"technique_ids": ["T1082", "T1033"]}, headers=analyst_headers)
-    assert response.status_code == 200
-    body = response.json()
-    assert body["mode"] == "simulated"
-    assert body["fallback_reason"] == "no cluster access"
-    assert body["ran"] == 2 and body["ingested"] == 2
-
-    events = client.get("/events", params={"limit": 10}, headers=analyst_headers).json()["events"]
-    simulated = [e for e in events if e["event_type"].startswith("bas_")]
-    assert len(simulated) == 2
-    assert all(e["message"].startswith("[BAS-SIMULATED]") and "not executed" in e["message"] for e in simulated)
+        response = client.post("/bas/run", json={"technique_ids": ["T1082"]}, headers=analyst_headers)
+    assert response.status_code == 503
 
 
-def test_run_bas_campaign_also_falls_back_on_unexpected_cluster_error(client, analyst_headers):
+def test_run_bas_campaign_returns_502_on_unexpected_cluster_error(client, analyst_headers):
     with patch("app.main.bas.run_campaign", side_effect=RuntimeError("pod scheduling failed")):
         response = client.post("/bas/run", json={"technique_ids": ["T1082"]}, headers=analyst_headers)
-    assert response.status_code == 200
-    assert response.json()["mode"] == "simulated"
-    assert "pod scheduling failed" in response.json()["fallback_reason"]
+    assert response.status_code == 502
+    assert "pod scheduling failed" in response.json()["detail"]
 
 
 def test_run_bas_campaign_ingests_real_events(client, analyst_headers):
@@ -221,22 +211,7 @@ def test_run_bas_campaign_ingests_real_events(client, analyst_headers):
 
     assert response.status_code == 200
     body = response.json()
-    assert body == {"ran": 1, "ingested": 1, "skipped": 0, "mode": "real"}
-
-
-def test_every_technique_has_simulated_output_and_a_clear_label():
-    assert set(bas.SIMULATED_OUTPUT) == set(bas.TECHNIQUES)
-    for technique_id, technique in bas.TECHNIQUES.items():
-        event = bas.simulate_technique(technique_id)
-        assert event["event_type"] == f"bas_{technique_id.lower()}"
-        assert event["severity"] == technique["severity"]
-        assert event["message"].startswith("[BAS-SIMULATED]")
-        assert "simulated, not executed" in event["message"]
-
-
-def test_simulate_technique_rejects_unknown_id():
-    with pytest.raises(ValueError):
-        bas.simulate_technique("T9999")
+    assert body == {"ran": 1, "ingested": 1, "skipped": 0}
 
 
 def test_run_bas_campaign_requires_operational_role(client, viewer_headers):
