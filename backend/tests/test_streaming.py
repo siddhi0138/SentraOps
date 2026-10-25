@@ -163,3 +163,31 @@ def test_streaming_ingest_scoped_to_organization(client, admin_headers, other_or
 
     assert own_status["queued"] == 1
     assert other_status["queued"] == 0
+
+
+def test_streaming_ingest_falls_back_to_inline_when_redis_is_down(client, analyst_headers):
+    from app.main import celery_app
+
+    was_eager = celery_app.conf.task_always_eager
+    celery_app.conf.task_always_eager = False
+    try:
+        with patch("app.main.worker_available", return_value=False):
+            response = client.post(
+                "/ingest/generic/stream",
+                json={"logs": [{"timestamp": "2026-07-27T00:00:00", "host": "h1", "event_type": "x", "message": "m"}]},
+                headers=analyst_headers,
+            )
+    finally:
+        celery_app.conf.task_always_eager = was_eager
+
+    assert response.status_code == 200
+    assert response.json() == {"queued": 0, "ingested": 1, "mode": "inline"}
+
+
+def test_streaming_status_reports_unavailable_when_redis_is_down(client, analyst_headers):
+    import redis
+
+    with patch("app.main.stream_status", side_effect=redis.ConnectionError("down")):
+        response = client.get("/streaming/status", headers=analyst_headers)
+    assert response.status_code == 200
+    assert response.json() == {"queued": 0, "pending": 0, "available": False}

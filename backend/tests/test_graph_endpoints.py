@@ -40,7 +40,7 @@ def test_incident_graph_returns_subgraph(client, analyst_headers):
 
     assert response.status_code == 200
     assert response.json() == fake_result
-    mocked.assert_called_once_with(incident_id, org_id)
+    assert mocked.call_args.args == (incident_id, org_id)
 
 
 def test_incident_graph_returns_503_when_neo4j_unavailable(client, analyst_headers):
@@ -70,7 +70,7 @@ def test_entity_blast_radius_returns_data(client, analyst_headers):
             "/graph/entity", params={"type": "host", "value": "FINANCE-PC-21", "hops": 3}, headers=analyst_headers
         )
     assert response.status_code == 200
-    mocked.assert_called_once_with("host", "FINANCE-PC-21", org_id, 3)
+    assert mocked.call_args.args == ("host", "FINANCE-PC-21", org_id, 3)
 
 
 def test_entity_blast_radius_rejects_hops_out_of_range(client, analyst_headers):
@@ -84,7 +84,7 @@ def test_full_graph_returns_data(client, analyst_headers):
     with patch("app.main.get_full_graph", return_value=fake_result) as mocked:
         response = client.get("/graph", headers=analyst_headers)
     assert response.status_code == 200
-    mocked.assert_called_once_with(org_id, 300)
+    assert mocked.call_args.args == (org_id, 300)
 
 
 def test_full_graph_returns_503_when_neo4j_unavailable(client, analyst_headers):

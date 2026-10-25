@@ -14,11 +14,11 @@ POD_READY_TIMEOUT_SECONDS = 30
 
 class BasNotConfiguredError(Exception):
     """No Kubernetes API access available - e.g. running under plain
-    `docker compose` locally instead of the real Helm/Kind deployment.
-    Deliberately has no fallback: unlike VirusTotal/AbuseIPDB (real data
-    vs. a local demo dataset - either is honest), there's no safe "fake"
-    version of *actually executing a technique* - it either runs for real
-    against a real sandboxed pod, or it doesn't run at all."""
+    `docker compose` locally, or on a host with no cluster like Render's free
+    tier, instead of the real Helm/Kind deployment. Techniques can't really
+    execute then. /bas/run falls back to simulate_campaign() below, whose
+    events are labeled "[BAS-SIMULATED]" and reported with mode="simulated", so
+    sample output is never presented as the result of a real execution."""
 
 
 # Real, safe-by-construction MITRE ATT&CK techniques: read-only discovery,
@@ -257,3 +257,49 @@ def teardown_target_pod(organization_id: int) -> bool:
             return False
         raise
     return True
+
+
+# Sample output for each technique, used only by simulate_campaign() when there is
+# no cluster to really run them in. Shaped like what the real command prints.
+SIMULATED_OUTPUT: dict[str, str] = {
+    "T1082": "Linux bas-target 6.1.0 #1 SMP x86_64 Linux; NAME=\"Alpine Linux\" VERSION_ID=3.19.1",
+    "T1033": "root; uid=0(root) gid=0(root) groups=0(root),1(bin),2(daemon)",
+    "T1057": "PID USER COMMAND: 1 root sleep 3600; 14 root sh -c ps aux; 20 root ps aux",
+    "T1016": "10.244.0.17; 127.0.0.1 localhost; 10.244.0.17 bas-target",
+    "T1105": "HTTP/1.1 200 OK",
+    "T1027": "d2hvYW1pCg==",
+    "T1083": "/bin /dev /etc /home /lib /media /mnt /opt /proc /root /run /sbin /srv /sys /tmp /usr /var",
+    "T1018": "nameserver 10.96.0.10; search default.svc.cluster.local svc.cluster.local",
+    "T1518": "busybox-1.36.1-r15; wget; /usr/bin/wget",
+    "T1069": "root:x:0:root; bin:x:1:root,bin,daemon; daemon:x:2:root,bin,daemon",
+    "T1552.001": "/etc/ssl/certs/ca-certificates.crt; /etc/shadow-",
+    "T1005": "/etc/resolv.conf; /etc/hosts; /root/.ash_history",
+    "T1560": "-rw-r--r-- 1 root root 142 /tmp/.sentraops_bas.tar.gz",
+    "T1070.004": "artifact removed",
+}
+SIMULATED_HOST = "bas-target-simulated"
+
+
+def simulate_technique(technique_id: str) -> dict:
+    """The simulated counterpart of run_technique(): the same event shape, with
+    canned sample output and an unmistakable "[BAS-SIMULATED]" label. Nothing is
+    executed anywhere."""
+    technique = TECHNIQUES.get(technique_id)
+    if not technique:
+        raise ValueError(f"Unknown technique '{technique_id}'. Supported: {sorted(TECHNIQUES)}")
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "host": SIMULATED_HOST,
+        "username": "bas-simulation",
+        "event_type": f"bas_{technique_id.lower()}",
+        "severity": technique["severity"],
+        "message": (
+            f"[BAS-SIMULATED] {technique_id} {technique['name']} ({technique['category']}) - "
+            f"simulated, not executed: {SIMULATED_OUTPUT.get(technique_id, '')}"
+        ),
+    }
+
+
+def simulate_campaign(technique_ids: list[str]) -> list[dict]:
+    return [simulate_technique(tid) for tid in technique_ids]

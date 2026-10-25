@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext'
 import { canAct as roleCanAct } from '../auth/roles'
 import { SeverityBadge } from '../components/Badge'
 import type { BasTechnique } from '../api/types'
+import { usePersistentState } from '../hooks/usePersistentState'
 
 export function BreachSimulationPage() {
   const { user } = useAuth()
@@ -14,9 +15,9 @@ export function BreachSimulationPage() {
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [tearingDown, setTearingDown] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = usePersistentState<string>('bas-message')
   const [error, setError] = useState<string | null>(null)
-  const [notConfigured, setNotConfigured] = useState(false)
+  const [lastMode, setLastMode] = usePersistentState<'real' | 'simulated'>('bas-last-mode')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -49,21 +50,22 @@ export function BreachSimulationPage() {
     setRunning(true)
     setMessage(null)
     setError(null)
-    setNotConfigured(false)
+    setLastMode(null)
     try {
       const res = await api.runBasCampaign([...selected])
       const correlateResult = await api.correlate()
       await api.syncGraph().catch(() => {})
+      setLastMode(res.mode)
+      const verb =
+        res.mode === 'simulated'
+          ? `Simulated ${res.ran} technique(s) - nothing was executed (no Kubernetes cluster is available here)`
+          : `Ran ${res.ran} technique(s) against a real sandboxed target pod`
       setMessage(
-        `Ran ${res.ran} technique(s) against a real sandboxed target pod - ${res.ingested} event(s) ingested, ` +
-          `${correlateResult.incidents_created} incident(s) created. Check the Incidents page for AI investigation.`
+        `${verb} - ${res.ingested} event(s) ingested, ${correlateResult.incidents_created} incident(s) created. ` +
+          'Check the Incidents page for AI investigation.'
       )
     } catch (err) {
-      if (err instanceof ApiError && err.status === 503) {
-        setNotConfigured(true)
-      } else {
-        setError(err instanceof ApiError ? err.message : 'Run failed')
-      }
+      setError(err instanceof ApiError ? err.message : 'Run failed')
     } finally {
       setRunning(false)
     }
@@ -89,20 +91,23 @@ export function BreachSimulationPage() {
         <h1 className="text-lg font-semibold text-foreground">Breach & Attack Simulation</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Executes real MITRE ATT&CK techniques inside a real, disposable Kubernetes pod - genuine attacker behavior
-          against a sandboxed target you own, not synthetic canned data. The real command output flows through the
-          same ingestion, correlation, and AI investigation pipeline as any other log source.
+          against a sandboxed target you own. The real command output flows through the same ingestion, correlation,
+          and AI investigation pipeline as any other log source. When no cluster is available (for example on a free
+          hosting plan), the run uses sample output instead and is clearly marked as simulated.
         </p>
       </div>
 
-      {message && <p className="text-sm text-severity-low">{message}</p>}
-      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
-      {notConfigured && (
-        <p className="text-sm text-muted-foreground bg-card/60 border border-secondary rounded-lg px-3 py-2">
-          BAS isn't available here - it only runs when SentraOps itself is deployed to a Kubernetes cluster (see
-          deploy/helm/), not under plain <code>docker compose up</code>.
+      {message && (
+        <p className="text-sm text-severity-low">
+          {lastMode === 'simulated' && (
+            <span className="mr-2 rounded border border-primary px-1.5 py-0.5 text-xs font-mono text-primary">
+              SIMULATED
+            </span>
+          )}
+          {message}
         </p>
       )}
-
+      {error && <p className="text-sm text-destructive bg-destructive/50 border border-destructive rounded-lg px-3 py-2">{error}</p>}
       {loading && <p className="text-muted-foreground text-sm">Loading techniques...</p>}
 
       {!loading && (
@@ -137,7 +142,7 @@ export function BreachSimulationPage() {
             disabled={running || selected.size === 0}
             className="rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 text-sm px-4 py-2 transition"
           >
-            {running ? 'Running against target pod...' : `Run ${selected.size} technique(s)`}
+            {running ? 'Running...' : `Run ${selected.size} technique(s)`}
           </button>
           <button
             onClick={() => void teardown()}

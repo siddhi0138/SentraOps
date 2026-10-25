@@ -658,6 +658,9 @@ export interface BasRunResult {
   ran: number
   ingested: number
   skipped: number
+  // 'simulated' = no cluster to run in, so labeled sample output was used (nothing executed).
+  mode: 'real' | 'simulated'
+  fallback_reason?: string
 }
 
 export interface KnowledgeDocument {

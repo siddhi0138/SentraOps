@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { api, clearTokens, getAccessToken, setTokens } from '../api/client'
 import type { User } from '../api/types'
+import { adoptPersistedStateFor, clearPersistedState } from '../hooks/usePersistentState'
 
 interface AuthContextValue {
   user: User | null
@@ -21,7 +22,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function restoreSession() {
       if (getAccessToken()) {
         try {
-          setUser(await api.me())
+          const me = await api.me()
+          adoptPersistedStateFor(me.id)
+          setUser(me)
         } catch {
           clearTokens()
         }
@@ -33,7 +36,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     setTokens(await api.login(email, password))
-    setUser(await api.me())
+    const me = await api.me()
+    adoptPersistedStateFor(me.id)
+    setUser(me)
   }
 
   async function register(email: string, password: string, organizationSlug: string) {
@@ -48,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function logout() {
     clearTokens()
+    clearPersistedState()
     setUser(null)
   }
 
