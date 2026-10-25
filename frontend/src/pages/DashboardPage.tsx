@@ -76,6 +76,32 @@ export function DashboardPage() {
     void loadData()
   }, [loadData])
 
+  // The AI investigation started by "Simulate attack" keeps running after the button is
+  // done. While the latest run is still going, check on it every few seconds so the card
+  // updates by itself (and the counts refresh when it finishes) without a page reload.
+  // Quiet on purpose: it doesn't go through loadData, which shows the loading screen.
+  const latestRunStatus = latestRun?.status
+  useEffect(() => {
+    if (latestRunStatus !== 'running') return
+    const startedWatching = Date.now()
+    const timer = setInterval(async () => {
+      // A run stuck as "running" shouldn't be polled forever.
+      if (Date.now() - startedWatching > 5 * 60 * 1000) {
+        clearInterval(timer)
+        return
+      }
+      try {
+        const runs = await api.listAllAgentRuns({ limit: 1 })
+        const latest = runs.runs[0] ?? null
+        setLatestRun(latest)
+        if (latest && latest.status !== 'running') setStats(await api.getStats())
+      } catch {
+        // try again on the next tick
+      }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [latestRunStatus])
+
   // Ingest -> correlate -> a real 6-agent investigation on the highest-risk
   // resulting incident -> graph sync, all real backend calls chained
   // together. Any account gets a fully populated demo from one click,
