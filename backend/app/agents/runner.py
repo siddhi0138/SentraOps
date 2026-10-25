@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.agents.normalize import action_list
 from app.agents.graph_context import build_graph_context
 from app.agents.memory import build_memory_context
 from app.db_models import AgentMessage, AgentRun, Asset, Incident, ProposedAction
@@ -47,7 +48,7 @@ def persist_investigation_result(db: Session, run: AgentRun, incident_id: int, f
     own row so the human-approval decision survives past this request/task,
     plus the full inter-agent message log."""
     persisted_actions = []
-    for action in final_state.get("response", {}).get("proposed_actions", []):
+    for action in action_list(final_state.get("response", {}).get("proposed_actions")):
         proposed = ProposedAction(
             organization_id=run.organization_id,
             incident_id=incident_id,

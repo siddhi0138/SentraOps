@@ -155,11 +155,14 @@ def chat_json(system_prompt: str, user_content: str, *, temperature: float = 0.2
         json_mode=True,
     )
 
-    raw = response.choices[0].message.content
+    # content can be None or empty (a reasoning model that used its whole token budget
+    # thinking), and valid JSON isn't always an object - either must not crash the caller.
+    raw = response.choices[0].message.content or ""
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError:
         return {"_raw": raw}
+    return parsed if isinstance(parsed, dict) else {"_raw": raw}
 
 
 def _format_evidence(evidence: list[dict]) -> str:

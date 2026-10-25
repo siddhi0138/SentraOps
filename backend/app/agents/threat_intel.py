@@ -1,3 +1,4 @@
+from app.agents.normalize import technique_list
 from app.ai import chat_json
 from app.agents.state import AgentState, add_message, format_timeline
 
@@ -45,12 +46,12 @@ def run(state: AgentState) -> dict:
 
     findings = {
         "summary": result.get("summary", result.get("_raw", "")),
-        "mitre_techniques": result.get("mitre_techniques", []),
+        "mitre_techniques": technique_list(result.get("mitre_techniques")),
         "malware_association": result.get("malware_association"),
         "matches": known,
         "confidence": result.get("confidence", 0),
     }
-    technique_ids = ", ".join(t.get("id", "?") for t in findings["mitre_techniques"]) or "none identified"
+    technique_ids = ", ".join(str(t.get("id", "?")) for t in findings["mitre_techniques"]) or "none identified"
     message = f"{findings['summary']} MITRE techniques: {technique_ids}."
 
     return {

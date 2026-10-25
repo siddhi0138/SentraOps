@@ -1,3 +1,4 @@
+from app.agents.normalize import action_list
 from app.ai import chat_json
 from app.agents.state import AgentState, add_message
 
@@ -39,7 +40,7 @@ def run(state: AgentState) -> dict:
     )
     result = chat_json(SYSTEM_PROMPT, user_content, max_tokens=500, feature="agent_response")
 
-    actions = result.get("actions", [])
+    actions = action_list(result.get("actions"))
     response = {
         "proposed_actions": actions,
         "urgency": result.get("urgency", "medium"),

@@ -153,6 +153,20 @@ app = FastAPI(title="SentraOps", version="0.2.0", lifespan=lifespan)
 # The frontend is a separate origin (its own dev server / nginx container),
 # so browser requests to this API need CORS. Comma-separated allowlist, or
 # "*" (default) for local/demo use.
+@app.middleware("http")
+async def unhandled_error_as_json(request: Request, call_next):
+    """Last resort for any exception no endpoint handled. Starlette's own 500 page is
+    produced outside the CORS middleware, so it has no Access-Control-Allow-Origin header
+    and the browser reports a CORS error that hides the real problem. This is registered
+    before the CORS middleware, so it runs inside it: the 500 below gets CORS headers
+    and the frontend can show its message."""
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": f"Internal error: {type(exc).__name__}"})
+
+
 _cors_origins = os.environ.get("CORS_ORIGINS", "*")
 _cors_origin_list = ["*"] if _cors_origins == "*" else [o.strip() for o in _cors_origins.split(",")]
 app.add_middleware(
@@ -1124,18 +1138,29 @@ def investigate_incident(
     db.commit()
     db.refresh(run)
 
-    timeline, asset_dicts, memory, graph_context = gather_investigation_inputs(db, incident)
-
     try:
-        state = run_investigation(incident, timeline, asset_dicts, memory, graph_context)
-    except ChatConfigError:
-        mark_run_failed(db, run, "GROQ_API_KEY is not set")
-        raise HTTPException(status_code=503, detail="AI chat isn't configured - set GROQ_API_KEY")
-    except ChatProviderError as exc:
-        mark_run_failed(db, run, str(exc))
-        raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
+        timeline, asset_dicts, memory, graph_context = gather_investigation_inputs(db, incident)
 
-    persisted_actions = persist_investigation_result(db, run, incident_id, state)
+        try:
+            state = run_investigation(incident, timeline, asset_dicts, memory, graph_context)
+        except ChatConfigError:
+            mark_run_failed(db, run, "GROQ_API_KEY is not set")
+            raise HTTPException(status_code=503, detail="AI chat isn't configured - set GROQ_API_KEY")
+        except ChatProviderError as exc:
+            mark_run_failed(db, run, str(exc))
+            raise HTTPException(status_code=502, detail=f"AI provider error: {exc}")
+
+        persisted_actions = persist_investigation_result(db, run, incident_id, state)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Anything else (an unexpected reply shape, a database error) is reported as a
+        # readable failure on the run, not an unhandled crash.
+        logger.exception("Investigation failed for incident %s", incident_id)
+        db.rollback()
+        reason = f"Investigation failed: {type(exc).__name__}: {str(exc)[:200]}"
+        mark_run_failed(db, run, reason)
+        raise HTTPException(status_code=500, detail=reason)
 
     state["run_id"] = run.id
     state["response"]["proposed_actions"] = [a.to_dict() for a in persisted_actions]

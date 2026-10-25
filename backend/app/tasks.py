@@ -87,8 +87,21 @@ def run_investigation_job(db, run_id: int, incident_id: int) -> None:
         except Exception:
             pass
         return
+    except Exception as exc:
+        logger.exception("Investigation failed for run %s", run_id)
+        db.rollback()
+        mark_run_failed(db, run, f"Investigation failed: {type(exc).__name__}: {str(exc)[:200]}")
+        publish_progress(run_id, {"type": "failed", "run_id": run_id, "error": run.error})
+        return
 
-    persist_investigation_result(db, run, incident_id, final_state)
+    try:
+        persist_investigation_result(db, run, incident_id, final_state)
+    except Exception as exc:
+        logger.exception("Saving the investigation result failed for run %s", run_id)
+        db.rollback()
+        mark_run_failed(db, run, f"Investigation failed: {type(exc).__name__}: {str(exc)[:200]}")
+        publish_progress(run_id, {"type": "failed", "run_id": run_id, "error": run.error})
+        return
     publish_progress(run_id, {"type": "completed", "run_id": run_id})
 
 
