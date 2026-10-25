@@ -88,6 +88,8 @@ Every agent's system prompt explicitly forbids inventing facts not present in wh
 - Dual-evidence confidence scoring on every chat answer — cross-checks the RAG retrieval's own semantic-similarity score against whether the same entities are actually connected in the real Neo4j attack graph, instead of trusting either signal alone
 - Institutional memory: repeat hosts/users and similar past incidents feed into agent reasoning, not just the current incident in isolation
 - Live streaming investigation status over WebSockets — each agent's output appears as it finishes, whether the investigation runs on the Celery worker or (when no worker is reachable) in the backend itself
+- **Simulate attack + correlate** returns as soon as the incident exists (about 15 seconds) and starts the AI investigation of the highest-risk incident in the background; the Dashboard's AI Analyst card checks on it every few seconds and updates by itself, and the AI Team page shows each agent as it finishes
+- The AI Analyst chat grounds its answers in vector search **plus** exact keyword matches (a few result slots are reserved for them), so a literal host name, user or IP in a question is always found; it never returns an empty answer — an empty model reply is retried once with a larger token budget, then reported as a readable error
 - Learning loop — analyst feedback (accurate / false positive / missed) on past AI investigations, tracked as a real accuracy record over time
 
 **🕸️ Graph & Simulation**
@@ -130,10 +132,12 @@ Free tiers pause, throttle, or delete things. Every outside dependency has a fal
 | **Neo4j** (deleted/paused Aura, bad `NEO4J_URI`) | Serves the attack graph, blast radius, Digital Twin and threat-intel graph from Postgres (same response shape). The AI investigation skips only the graph step. |
 | **Redis** | The AI Team's live investigation runs in a background thread of the backend and streams progress from memory; streamed log ingest is saved directly; rate limits use in-memory counters; a backup scheduler sends the daily Slack summaries. |
 | **Celery worker asleep** (free worker services sleep when idle) | Redis being up isn't enough — the backend pings for a worker (cached 30 s) and runs the job itself if none answers, so nothing sits queued. |
-| **Embeddings service** (sleeping or rate-limited) | Retries with backoff, then search falls back to keyword matching; data is always saved, and missing search vectors are added later (`POST /rag/reindex`, also run automatically after the next successful ingest). |
+| **Embeddings service** (sleeping or rate-limited) | Retries with backoff, then search falls back to keyword matching; data is always saved, and missing search vectors are filled in later — retried in the background after 20 s, 1 min and 3 min (and whenever a chat question finds no events or incidents), by `POST /rag/reindex`, and automatically after the next successful ingest. |
 | **A retired Groq model** | If the configured model returns `model_not_found`, the next one in `GROQ_MODEL_FALLBACKS` is tried and remembered. |
 | **Hosted Postgres pausing** (e.g. Neon) | Connections are health-checked before use and recycled every 4 minutes, so the first request after a pause reconnects instead of failing. |
 | **Kubernetes** (no cluster) | Breach & Attack Simulation runs a labeled simulated campaign (see above). |
+
+AI replies in an unexpected shape (an empty reply from a reasoning model, a list of plain strings where objects were expected) are coerced instead of crashing an investigation, and any other failure is recorded on the run as a readable "Investigation failed: …" reason. A last-resort handler turns any unhandled server error into a JSON 500 that carries CORS headers — without it the browser reports a CORS error that hides the real problem. Passwords are limited to 72 bytes (bcrypt's limit): longer ones are rejected at signup with a clear message instead of crashing.
 
 On the frontend, what a screen last showed (AI answers, briefings, chat, action results) is kept across refreshes, tab switches and closing the browser — stored locally for up to 7 days, and cleared on logout or when a different user signs in. Records themselves (events, incidents, runs) always load fresh from the server.
 
@@ -306,7 +310,7 @@ cd backend && pytest
 cd frontend && npm run build   # typecheck + production build
 ```
 
-615 backend tests, **89% line coverage** (`pytest --cov=app`, tool-measured) —
+643 backend tests, **89% line coverage** as of the last full `pytest --cov=app` run (tool-measured) —
 including the FastAPI route layer itself (`app/main.py`, 89%), not just
 isolated logic. The one file at 0% (`app/embeddings_service.py`) is the
 entrypoint for a separate microservice that runs as its own Render
